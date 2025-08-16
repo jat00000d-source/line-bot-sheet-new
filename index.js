@@ -948,3 +948,11 @@ app.listen(port, () => {
   console.log('- 預算超支警告');
   console.log('- 記帳後即時顯示剩餘預算');
 });
+// 在你現有的 app.get() 或 app.post() 附近添加：
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    message: 'Service is alive'
+  });
+});
