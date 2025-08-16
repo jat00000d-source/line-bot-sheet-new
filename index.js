@@ -1,4 +1,99 @@
-// index.js - 主要程式檔案
+// 取得使用說明（修改版，包含預算功能說明）
+function getHelpMessage(language = 'zh') {
+  if (language === 'ja') {
+    return `📝 記帳ボット使用説明\n\n` +
+           `💡 記帳形式：\n` +
+           `【従来形式】\n` +
+           `項目　金額　[備考]（全角スペース対応）\n` +
+           `項目 金額 [備考]（半角スペース対応）\n\n` +
+           `【自然言語形式】NEW！\n` +
+           `• 昨日ランチ100円食べた\n` +
+           `• 今日コーヒー85円\n` +
+           `• 交通費150\n` +
+           `• 午餐100元（中国語もOK）\n\n` +
+           `💰 予算管理：NEW！\n` +
+           `• 予算設定 50000 （月度予算設定）\n` +
+           `• 予算 （予算状況確認）\n` +
+           `• 残り （残額確認）\n\n` +
+           `📌 例：\n` +
+           `• 昼食　150\n` +
+           `• コーヒー　85　スターバックス\n` +
+           `• 昨天午餐吃了200\n` +
+           `• 前天買咖啡花80\n\n` +
+           `📊 查看總結：\n` +
+           `輸入「總結」查看本月支出\n\n` +
+           `✨ 特色功能：\n` +
+           `• 月度預算設定與管理\n` +
+           `• 自動計算剩餘金額與使用率\n` +
+           `• 每日可用金額顯示\n` +
+           `• 預算警告提醒功能\n` +
+           `• 支援全形、半形空格\n` +
+           `• 自然語言理解\n` +
+           `• 支援中日雙語指令`;
+  }
+}
+
+// 健康檢查路由
+app.get('/', (req, res) => {
+  res.json({
+    status: 'LINE記帳機器人運行中（預算管理版）',
+    timestamp: new Date().toISOString(),
+    version: '4.0.0',
+    features: [
+      '月度預算設定',
+      '剩餘金額計算',
+      '預算使用率監控',
+      '每日可用金額',
+      '預算警告提醒',
+      '全形空格支援',
+      '自然語言處理',
+      '智能日期識別',
+      '中日雙語支援'
+    ]
+  });
+});
+
+// 啟動伺服器
+app.listen(port, () => {
+  console.log(`LINE記帳機器人服務器運行在埠口 ${port}`);
+  console.log('新功能：');
+  console.log('- 月度預算管理');
+  console.log('- 剩餘金額自動計算');
+  console.log('- 預算使用率監控');
+  console.log('- 每日可用金額顯示');
+  console.log('- 預算超支警告');
+  console.log('- 記帳後即時顯示剩餘預算');
+}); まとめ確認：\n` +
+           `「集計」で今月の支出を確認\n\n` +
+           `✨ 特長：\n` +
+           `• 月度予算設定・管理\n` +
+           `• 自動で残額・使用率計算\n` +
+           `• 1日使用可能金額表示\n` +
+           `• 予算警告機能\n` +
+           `• 全角・半角スペース対応\n` +
+           `• 自然言語理解\n` +
+           `• 中国語・日本語対応`;
+  } else {
+    return `📝 記帳機器人使用說明\n\n` +
+           `💡 記帳格式：\n` +
+           `【傳統格式】\n` +
+           `項目　金額　[備註]（支援全形空格）\n` +
+           `項目 金額 [備註]（支援半形空格）\n\n` +
+           `【自然語言格式】全新功能！\n` +
+           `• 昨天午餐吃了100元\n` +
+           `• 今天咖啡85円\n` +
+           `• 交通費150\n` +
+           `• ランチ200（日文也可以）\n\n` +
+           `💰 預算管理：全新功能！\n` +
+           `• 設定預算 50000 （設定月度預算）\n` +
+           `• 預算 （查看預算狀況）\n` +
+           `• 剩餘 （查看剩餘金額）\n\n` +
+           `📌 範例：\n` +
+           `• 午餐　150\n` +
+           `• 咖啡　85　星巴克\n` +
+           `• 昨天買東西花了200\n` +
+           `• 前天搭車用50\n\n` +
+           `📊// index.js - 主要程式檔案
 const express = require('express');
 const line = require('@line/bot-sdk');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
@@ -30,6 +125,10 @@ const COMMAND_MAPPING = {
   '本月總結': 'summary',
   '說明': 'help',
   '幫助': 'help',
+  '設定預算': 'set_budget',
+  '預算': 'budget',
+  '查看預算': 'budget',
+  '剩餘': 'remaining',
   
   // 日文指令
   '集計': 'summary',
@@ -38,7 +137,11 @@ const COMMAND_MAPPING = {
   '今月集計': 'summary',
   '説明': 'help',
   'ヘルプ': 'help',
-  '助け': 'help'
+  '助け': 'help',
+  '予算設定': 'set_budget',
+  '予算': 'budget',
+  '残り': 'remaining',
+  '残額': 'remaining'
 };
 
 const CATEGORY_MAPPING = {
@@ -344,6 +447,16 @@ function parseCommand(message) {
     };
   }
   
+  // 檢查是否為設定預算格式
+  if (isBudgetSetting(message)) {
+    return {
+      success: true,
+      commandType: 'set_budget',
+      language,
+      originalMessage: message
+    };
+  }
+  
   // 使用自然語言處理器解析
   const nlResult = nlp.parseNaturalLanguage(message, language);
   if (nlResult.success) {
@@ -420,6 +533,21 @@ async function handleEvent(event) {
           text: result
         });
         
+      case 'set_budget':
+        const budgetResult = await setBudget(messageText, language);
+        return client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: budgetResult
+        });
+        
+      case 'budget':
+      case 'remaining':
+        const budgetInfo = await getBudgetInfo(language);
+        return client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: budgetInfo
+        });
+        
       case 'help':
         const helpText = getHelpMessage(language);
         return client.replyMessage(event.replyToken, {
@@ -451,7 +579,7 @@ async function handleEvent(event) {
   }
 }
 
-// 新的記帳函數（基於解析後的數據）
+// 新的記帳函數（基於解析後的數據）+ 預算提醒
 async function addExpenseRecordFromParsed(parsedData, language = 'zh') {
   try {
     let { item, amount, note, dateOffset } = parsedData;
@@ -484,18 +612,29 @@ async function addExpenseRecordFromParsed(parsedData, language = 'zh') {
       '備註': note
     });
 
-    // 雙語回應（使用円）
+    // 獲取預算資訊並計算剩餘
+    const budgetInfo = await calculateBudgetRemaining(language);
+    
+    // 組合基本回應
     const dateLabel = dateOffset === 0 ? 
       (language === 'ja' ? '今日' : '今天') :
       (dateOffset === -1 ? 
         (language === 'ja' ? '昨日' : '昨天') : 
         `${Math.abs(dateOffset)}${language === 'ja' ? '日前' : '天前'}`);
     
+    let response;
     if (language === 'ja') {
-      return `✅ 記録完了！\n日付：${dateStr}（${dateLabel}）\n項目：${item}\n金額：${amount.toLocaleString('ja-JP')}円\n備考：${note}`;
+      response = `✅ 記録完了！\n日付：${dateStr}（${dateLabel}）\n項目：${item}\n金額：${amount.toLocaleString('ja-JP')}円\n備考：${note}`;
     } else {
-      return `✅ 記帳成功！\n日期：${dateStr}（${dateLabel}）\n項目：${item}\n金額：${amount.toLocaleString('zh-TW')}円\n備註：${note}`;
+      response = `✅ 記帳成功！\n日期：${dateStr}（${dateLabel}）\n項目：${item}\n金額：${amount.toLocaleString('zh-TW')}円\n備註：${note}`;
     }
+
+    // 添加預算資訊
+    if (budgetInfo.hasBudget) {
+      response += '\n\n' + budgetInfo.message;
+    }
+
+    return response;
 
   } catch (error) {
     console.error('添加記帳記錄時發生錯誤:', error);
@@ -563,6 +702,198 @@ function isExpenseRecord(text) {
   return parts.length >= 2 && !isNaN(parseFloat(parts[1]));
 }
 
+// 檢查是否為預算設定格式
+function isBudgetSetting(text) {
+  // 匹配各種預算設定格式
+  const patterns = [
+    /^設定預算[\s　]+(\d+)/,
+    /^預算設定[\s　]+(\d+)/,
+    /^予算設定[\s　]+(\d+)/,
+    /^予算[\s　]+(\d+)/,
+    /^預算[\s　]+(\d+)/
+  ];
+  
+  return patterns.some(pattern => pattern.test(text.trim()));
+}
+
+// 設定月度預算
+async function setBudget(messageText, language = 'zh') {
+  try {
+    // 提取預算金額
+    const budgetMatch = messageText.match(/(\d+)/);
+    if (!budgetMatch) {
+      return language === 'ja' ? 
+        '予算金額を正しく入力してください。例：予算設定 50000' : 
+        '請正確輸入預算金額，例如：設定預算 50000';
+    }
+
+    const budgetAmount = parseInt(budgetMatch[1]);
+    const doc = await getGoogleSheet();
+    const now = new Date();
+    const sheetName = formatDate(now, 'YYYY-MM');
+
+    // 取得或建立當月工作表
+    let sheet = doc.sheetsByTitle[sheetName];
+    if (!sheet) {
+      sheet = await createNewMonthSheet(doc, sheetName);
+    }
+
+    // 尋找是否已有預算設定
+    const rows = await sheet.getRows();
+    const budgetRow = rows.find(row => row.get('項目') === '月度預算');
+
+    if (budgetRow) {
+      // 更新現有預算
+      budgetRow.set('金額', budgetAmount);
+      await budgetRow.save();
+    } else {
+      // 新增預算記錄（放在第一行）
+      await sheet.addRow({
+        '日期': '預算',
+        '項目': '月度預算',
+        '金額': budgetAmount,
+        '備註': `${sheetName}月度預算設定`
+      });
+    }
+
+    // 計算當前剩餘預算
+    const remaining = await calculateBudgetRemaining(language);
+
+    if (language === 'ja') {
+      return `💰 今月の予算を${budgetAmount.toLocaleString('ja-JP')}円に設定しました！\n\n${remaining.message}`;
+    } else {
+      return `💰 本月預算已設定為 ${budgetAmount.toLocaleString('zh-TW')} 円！\n\n${remaining.message}`;
+    }
+
+  } catch (error) {
+    console.error('設定預算時發生錯誤:', error);
+    return language === 'ja' ? 
+      '予算設定に失敗しました。しばらく後にもう一度お試しください' : 
+      '預算設定失敗，請稍後再試';
+  }
+}
+
+// 獲取預算資訊
+async function getBudgetInfo(language = 'zh') {
+  try {
+    const budgetInfo = await calculateBudgetRemaining(language);
+    return budgetInfo.message;
+  } catch (error) {
+    console.error('獲取預算資訊時發生錯誤:', error);
+    return language === 'ja' ? 
+      '予算情報の取得に失敗しました' : 
+      '無法獲取預算資訊';
+  }
+}
+
+// 計算剩餘預算
+async function calculateBudgetRemaining(language = 'zh') {
+  try {
+    const doc = await getGoogleSheet();
+    const now = new Date();
+    const sheetName = formatDate(now, 'YYYY-MM');
+
+    const sheet = doc.sheetsByTitle[sheetName];
+    if (!sheet) {
+      return {
+        hasBudget: false,
+        message: language === 'ja' ? 
+          'まだ予算が設定されていません。「予算設定 金額」で設定してください' : 
+          '尚未設定預算，請使用「設定預算 金額」來設定'
+      };
+    }
+
+    const rows = await sheet.getRows();
+    
+    // 尋找預算設定
+    const budgetRow = rows.find(row => row.get('項目') === '月度預算');
+    if (!budgetRow) {
+      return {
+        hasBudget: false,
+        message: language === 'ja' ? 
+          'まだ予算が設定されていません。「予算設定 金額」で設定してください' : 
+          '尚未設定預算，請使用「設定預算 金額」來設定'
+      };
+    }
+
+    const budget = parseFloat(budgetRow.get('金額')) || 0;
+    
+    // 計算總支出（排除預算記錄）
+    let totalExpense = 0;
+    let expenseCount = 0;
+    
+    rows.forEach(row => {
+      if (row.get('項目') !== '月度預算') {
+        const amount = parseFloat(row.get('金額'));
+        if (!isNaN(amount)) {
+          totalExpense += amount;
+          expenseCount++;
+        }
+      }
+    });
+
+    const remaining = budget - totalExpense;
+    const usagePercentage = budget > 0 ? ((totalExpense / budget) * 100).toFixed(1) : 0;
+    
+    // 計算每日剩餘可用金額
+    const today = now.getDate();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const remainingDays = daysInMonth - today + 1;
+    const dailyAllowance = remaining > 0 && remainingDays > 0 ? Math.floor(remaining / remainingDays) : 0;
+
+    // 預算狀態判斷
+    let statusIcon = '💚';
+    let warningMessage = '';
+    
+    if (usagePercentage >= 100) {
+      statusIcon = '🚨';
+      warningMessage = language === 'ja' ? 
+        '\n⚠️ 予算をオーバーしています！' : 
+        '\n⚠️ 已超出預算！';
+    } else if (usagePercentage >= 80) {
+      statusIcon = '🟡';
+      warningMessage = language === 'ja' ? 
+        '\n⚠️ 予算の80%を使用しました' : 
+        '\n⚠️ 已使用80%預算';
+    } else if (usagePercentage >= 60) {
+      statusIcon = '🟠';
+    }
+
+    if (language === 'ja') {
+      return {
+        hasBudget: true,
+        remaining: remaining,
+        message: `${statusIcon} 今月の予算状況\n` +
+                `💰 予算：${budget.toLocaleString('ja-JP')}円\n` +
+                `💸 支出：${totalExpense.toLocaleString('ja-JP')}円 (${usagePercentage}%)\n` +
+                `💵 残り：${remaining.toLocaleString('ja-JP')}円\n` +
+                `📅 1日使用可能：${dailyAllowance.toLocaleString('ja-JP')}円\n` +
+                `📊 記録数：${expenseCount}件${warningMessage}`
+      };
+    } else {
+      return {
+        hasBudget: true,
+        remaining: remaining,
+        message: `${statusIcon} 本月預算狀況\n` +
+                `💰 預算：${budget.toLocaleString('zh-TW')} 円\n` +
+                `💸 支出：${totalExpense.toLocaleString('zh-TW')} 円 (${usagePercentage}%)\n` +
+                `💵 剩餘：${remaining.toLocaleString('zh-TW')} 円\n` +
+                `📅 每日可用：${dailyAllowance.toLocaleString('zh-TW')} 円\n` +
+                `📊 記錄筆數：${expenseCount} 筆${warningMessage}`
+      };
+    }
+
+  } catch (error) {
+    console.error('計算剩餘預算時發生錯誤:', error);
+    return {
+      hasBudget: false,
+      message: language === 'ja' ? 
+        '予算計算中にエラーが発生しました' : 
+        '預算計算時發生錯誤'
+    };
+  }
+}
+
 // 建立新的月份工作表
 async function createNewMonthSheet(doc, sheetName) {
   const sheet = await doc.addSheet({
@@ -589,7 +920,7 @@ async function createNewMonthSheet(doc, sheetName) {
   return sheet;
 }
 
-// 取得月度支出總結（修改版，支援雙語+円）
+// 取得月度支出總結（修改版，包含預算資訊）
 async function getMonthlyExpenseSummary(language = 'zh') {
   try {
     const doc = await getGoogleSheet();
@@ -610,33 +941,44 @@ async function getMonthlyExpenseSummary(language = 'zh') {
         `本月（${sheetName}）尚未有任何記帳記錄`;
     }
 
-    // 計算總支出
+    // 計算總支出（排除預算記錄）
     let totalExpense = 0;
     let recordCount = 0;
 
     rows.forEach(row => {
-      const amount = parseFloat(row.get('金額'));
-      if (!isNaN(amount)) {
-        totalExpense += amount;
-        recordCount++;
+      if (row.get('項目') !== '月度預算') {
+        const amount = parseFloat(row.get('金額'));
+        if (!isNaN(amount)) {
+          totalExpense += amount;
+          recordCount++;
+        }
       }
     });
 
     const currentDay = now.getDate();
     const avgDaily = recordCount > 0 ? Math.round(totalExpense / currentDay) : 0;
 
-    // 雙語回應（使用円）
+    // 基本總結
+    let summary;
     if (language === 'ja') {
-      return `📊 ${sheetName} 支出まとめ\n` +
-             `💰 総支出：${totalExpense.toLocaleString('ja-JP')}円\n` +
-             `📝 記録数：${recordCount}件\n` +
-             `📅 1日平均：${avgDaily.toLocaleString('ja-JP')}円`;
+      summary = `📊 ${sheetName} 支出まとめ\n` +
+               `💰 総支出：${totalExpense.toLocaleString('ja-JP')}円\n` +
+               `📝 記録数：${recordCount}件\n` +
+               `📅 1日平均：${avgDaily.toLocaleString('ja-JP')}円`;
     } else {
-      return `📊 ${sheetName} 支出總結\n` +
-             `💰 總支出：${totalExpense.toLocaleString('zh-TW')}円\n` +
-             `📝 記錄筆數：${recordCount} 筆\n` +
-             `📅 平均每日：${avgDaily.toLocaleString('zh-TW')}円`;
+      summary = `📊 ${sheetName} 支出總結\n` +
+               `💰 總支出：${totalExpense.toLocaleString('zh-TW')}円\n` +
+               `📝 記錄筆數：${recordCount} 筆\n` +
+               `📅 平均每日：${avgDaily.toLocaleString('zh-TW')}円`;
     }
+
+    // 添加預算資訊
+    const budgetInfo = await calculateBudgetRemaining(language);
+    if (budgetInfo.hasBudget) {
+      summary += '\n\n' + budgetInfo.message;
+    }
+
+    return summary;
 
   } catch (error) {
     console.error('取得月總結時發生錯誤:', error);
