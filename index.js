@@ -168,6 +168,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+// 提醒排程器狀態查詢
+app.get('/scheduler/status', (req, res) => {
+  const status = reminderScheduler.getStatus();
+  res.json({
+    scheduler: status,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // 啟動伺服器
 app.listen(config.server.port, () => {
   console.log(`🚀 LINE記帳機器人服務器運行在埠口 ${config.server.port}`);
