@@ -1,6 +1,6 @@
 // utils/languageDetector.js
 
-class LanguageDetector {
+class languageDetector {
   /**
    * 偵測訊息語言
    * @param {string} message - 訊息文本
