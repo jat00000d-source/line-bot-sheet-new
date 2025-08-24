@@ -1,15 +1,20 @@
-// utils/commandParser.js
+// utils/commandParser.js (更新版)
 const { COMMAND_MAPPING, COMMAND_TYPES } = require('../constants/commands');
 const { ERROR_MESSAGES, PROMPT_MESSAGES } = require('../constants/messages');
 const LanguageDetector = require('./languageDetector');
+const ExpenseParser = require('../parsers/expenseParser');
 
 class CommandParser {
+  constructor() {
+    this.expenseParser = new ExpenseParser();
+  }
+
   /**
    * 解析輸入指令
    * @param {string} message - 用戶輸入訊息
    * @returns {Object} 解析結果
    */
-  static parseCommand(message) {
+  parseCommand(message) {
     if (!message || typeof message !== 'string') {
       return {
         success: false,
@@ -33,7 +38,7 @@ class CommandParser {
         return budgetCommand;
       }
       
-      // 3. 嘗試解析為記帳資料（使用原有邏輯，之後會拆分）
+      // 3. 嘗試解析為記帳資料
       const expenseCommand = this.parseExpenseCommand(trimmedMessage, language);
       if (expenseCommand.success) {
         return expenseCommand;
@@ -62,7 +67,7 @@ class CommandParser {
    * @param {string} language - 語言
    * @returns {Object} 解析結果
    */
-  static parsePredefinedCommand(message, language) {
+  parsePredefinedCommand(message, language) {
     const commandType = COMMAND_MAPPING[message];
     
     if (commandType) {
@@ -83,7 +88,7 @@ class CommandParser {
    * @param {string} language - 語言
    * @returns {Object} 解析結果
    */
-  static parseBudgetCommand(message, language) {
+  parseBudgetCommand(message, language) {
     // 匹配各種預算設定格式
     const patterns = [
       /^設定預算[\s　]+(\d+)/,
@@ -110,16 +115,33 @@ class CommandParser {
   }
   
   /**
-   * 解析記帳指令（暫時簡化，之後會拆分到 ExpenseParser）
+   * 解析記帳指令
    * @param {string} message - 訊息內容  
    * @param {string} language - 語言
    * @returns {Object} 解析結果
    */
-  static parseExpenseCommand(message, language) {
-    // 暫時返回失敗，等待 ExpenseParser 實作
-    // 這裡之後會調用 ExpenseParser.parseNaturalLanguage()
+  parseExpenseCommand(message, language) {
+    // 使用 ExpenseParser 解析記帳資料
+    const parseResult = this.expenseParser.parseNaturalLanguage(message, language);
+    
+    if (parseResult.success) {
+      return {
+        success: true,
+        commandType: COMMAND_TYPES.EXPENSE,
+        language,
+        originalMessage: message,
+        parsedData: parseResult
+      };
+    }
+    
     return { success: false };
   }
 }
 
-module.exports = CommandParser;
+// 創建單例實例
+const commandParser = new CommandParser();
+
+module.exports = {
+  parseCommand: (message) => commandParser.parseCommand(message),
+  CommandParser
+};
