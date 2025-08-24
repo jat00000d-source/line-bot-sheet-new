@@ -4,6 +4,7 @@ const line = require('@line/bot-sdk');
 const config = require('./config/config');
 const ExpenseController = require('./controllers/expenseController');
 const TodoController = require('./controllers/todoController');
+const ReminderScheduler = require('./services/reminderScheduler');
 const LanguageDetector = require('./utils/languageDetector');
 const { parseCommand } = require('./utils/commandParser');
 const app = express();
@@ -14,6 +15,9 @@ const client = new line.Client(config.line);
 // 控制器實例
 const expenseController = new ExpenseController();
 const todoController = new TodoController();
+
+// 提醒排程器實例
+const reminderScheduler = new ReminderScheduler();
 
 // LINE Webhook 處理
 app.post('/webhook', line.middleware(config.line), (req, res) => {
@@ -179,6 +183,12 @@ app.listen(config.server.port, () => {
   
   if (config.features.debugMode) {
     console.log('🐛 除錯模式已啟用');
+  }
+  
+  // 啟動提醒排程器
+  if (config.features.reminderSystem) {
+    console.log('⏰ 正在啟動提醒排程器...');
+    reminderScheduler.start();
   }
 });
 
