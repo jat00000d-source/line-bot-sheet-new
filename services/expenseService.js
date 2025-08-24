@@ -3,7 +3,7 @@ const GoogleSheetService = require('./googleSheetService');
 const DateHelper = require('../utils/dateHelper');
 const { CATEGORY_MAPPING } = require('../constants/commands');
 const { SUCCESS_MESSAGES, ERROR_MESSAGES } = require('../constants/messages');
-const languageDetector = require('../utils/languageDetector');
+const LanguageDetector = require('../utils/languageDetector');
 
 class ExpenseService {
   constructor() {
