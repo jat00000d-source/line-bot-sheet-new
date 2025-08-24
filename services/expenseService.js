@@ -67,6 +67,8 @@ class ExpenseService {
 
   /**
    * 設定月度預算
+ /**
+   * 设置预算
    * @param {string} messageText - 原始訊息文本
    * @param {string} language - 語言代碼
    * @returns {Promise<string>} 回應訊息
@@ -75,6 +77,25 @@ class ExpenseService {
     try {
       // 提取預算金額
       const budgetMatch = messageText.match(/(\d+)/);
+      
+      if (!budgetMatch) {
+        return language === 'zh' ? '請輸入有效的預算金額' : 'Please enter a valid budget amount';
+      }
+      
+      const budgetAmount = parseInt(budgetMatch[1]);
+      
+      // 这里添加你的预算设置逻辑
+      // 例如：保存到 Google Sheets 或数据库
+      
+      return language === 'zh' ? 
+        `預算已設定為 ${budgetAmount} 元` : 
+        `Budget set to ${budgetAmount}`;
+        
+    } catch (error) {
+      console.error('設定預算時發生錯誤:', error);
+      return language === 'zh' ? '設定預算時發生錯誤' : 'Error setting budget';
+    }
+  }
       if (!budgetMatch) {
         return LanguageDetector.getMessage('BUDGET_FORMAT_HINT', ERROR_MESSAGES, language);
       }
