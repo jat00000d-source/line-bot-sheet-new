@@ -1,10 +1,10 @@
-// index.js (重構版 - 修正版)
+// index.js (重構版 - 大幅簡化)
 const express = require('express');
 const line = require('@line/bot-sdk');
 const config = require('./config/config');
 const ExpenseController = require('./controllers/expenseController');
 const LanguageDetector = require('./utils/languageDetector');
-const CommandParser = require('./utils/commandParser'); // ✅ 改成整個 class
+const { parseCommand } = require('./utils/commandParser');
 
 const app = express();
 
@@ -40,7 +40,7 @@ async function handleEvent(event) {
   
   try {
     // 解析指令
-    const parsed = CommandParser.parseCommand(messageText); // ✅ 改成用 class 呼叫
+    const parsed = parseCommand(messageText);
     
     if (!parsed.success) {
       return client.replyMessage(event.replyToken, {
@@ -59,6 +59,8 @@ async function handleEvent(event) {
       response = expenseController.getHelpMessage(language);
     } else {
       // 未來可以加入其他功能的路由
+      // } else if (isReminderCommand(commandType)) {
+      //   response = await reminderController.handleReminder(parsed);
       response = language === 'ja' ? 
         '未対応のコマンドです' : 
         '不支援的指令';
