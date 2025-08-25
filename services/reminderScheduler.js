@@ -1,274 +1,251 @@
-// services/reminderScheduler.js - 提醒排程器
-const line = require('@line/bot-sdk');
-const config = require('../config/config');
-const TodoService = require('./todoService');
+const cron = require('node-cron');
+const reminderService = require('./reminderService');
+const notificationService = require('./notificationService');
 
 class ReminderScheduler {
-  constructor() {
-    this.client = new line.Client(config.line);
-    this.todoService = new TodoService();
-    this.intervalId = null;
-    this.isRunning = false;
-  }
-
-  /**
-   * 啟動提醒排程器
-   */
-  start() {
-    if (this.isRunning) {
-      console.log('⚠️  提醒排程器已在運行中');
-      return;
+    constructor() {
+        this.scheduledTasks = new Map();
+        this.isRunning = false;
     }
 
-    console.log('🚀 啟動提醒排程器...');
-    this.isRunning = true;
-    
-    // 立即執行一次檢查
-    this.checkReminders();
-    
-    // 設定定期檢查
-    this.intervalId = setInterval(() => {
-      this.checkReminders();
-    }, config.reminder.checkInterval);
-    
-    console.log(`✅ 提醒排程器已啟動，檢查間隔：${config.reminder.checkInterval / 1000}秒`);
-  }
-
-  /**
-   * 停止提醒排程器
-   */
-  stop() {
-    if (!this.isRunning) {
-      console.log('⚠️  提醒排程器未在運行');
-      return;
-    }
-
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-    
-    this.isRunning = false;
-    console.log('🛑 提醒排程器已停止');
-  }
-
-  /**
-   * 檢查並發送提醒
-   */
-  async checkReminders() {
-    try {
-      const now = new Date();
-      console.log(`🔍 檢查提醒 - ${now.toISOString()}`);
-      
-      // 獲取所有活躍的提醒
-      const activeReminders = await this.todoService.getActiveReminders();
-      
-      if (!activeReminders || activeReminders.length === 0) {
-        return;
-      }
-      
-      console.log(`📋 找到 ${activeReminders.length} 個活躍提醒`);
-      
-      for (const reminder of activeReminders) {
-        if (this.shouldTrigger(reminder, now)) {
-          await this.sendReminder(reminder);
-          await this.updateReminderAfterTrigger(reminder);
+    /**
+     * 啟動排程器
+     */
+    start() {
+        if (this.isRunning) {
+            console.log('排程器已經在運行中');
+            return;
         }
-      }
-    } catch (error) {
-      console.error('❌ 檢查提醒時發生錯誤:', error);
-    }
-  }
 
-  /**
-   * 判斷提醒是否應該觸發
-   * @param {Object} reminder - 提醒物件
-   * @param {Date} now - 當前時間
-   * @returns {boolean} 是否應該觸發
-   */
-  shouldTrigger(reminder, now) {
-    const reminderTime = new Date(reminder.reminderTime);
-    
-    // 檢查是否已到提醒時間（允許1分鐘誤差）
-    const timeDiff = now.getTime() - reminderTime.getTime();
-    if (timeDiff < 0 || timeDiff > 60000) { // 60秒內
-      return false;
+        console.log('啟動提醒排程器...');
+        
+        // 每分鐘檢查一次待執行的提醒
+        this.mainTask = cron.schedule('* * * * *', async () => {
+            await this.checkAndExecuteReminders();
+        }, {
+            scheduled: false,
+            timezone: 'Asia/Taipei'
+        });
+
+        this.mainTask.start();
+        this.isRunning = true;
+        
+        console.log('提醒排程器已啟動');
     }
 
-    // 檢查上次觸發時間，避免重複發送
-    if (reminder.lastTriggered) {
-      const lastTriggered = new Date(reminder.lastTriggered);
-      const sinceLastTrigger = now.getTime() - lastTriggered.getTime();
-      if (sinceLastTrigger < 60000) { // 60秒內不重複發送
+    /**
+     * 停止排程器
+     */
+    stop() {
+        if (!this.isRunning) {
+            console.log('排程器沒有在運行');
+            return;
+        }
+
+        console.log('停止提醒排程器...');
+        
+        if (this.mainTask) {
+            this.mainTask.destroy();
+        }
+
+        // 停止所有個別排程任務
+        this.scheduledTasks.forEach((task) => {
+            task.destroy();
+        });
+        this.scheduledTasks.clear();
+
+        this.isRunning = false;
+        console.log('提醒排程器已停止');
+    }
+
+    /**
+     * 重啟排程器
+     */
+    restart() {
+        this.stop();
+        setTimeout(() => {
+            this.start();
+        }, 1000);
+    }
+
+    /**
+     * 檢查並執行待執行的提醒
+     */
+    async checkAndExecuteReminders() {
+        try {
+            const pendingReminders = await reminderService.getPendingReminders();
+            
+            if (pendingReminders.length === 0) {
+                return;
+            }
+
+            console.log(`找到 ${pendingReminders.length} 個待執行的提醒`);
+
+            for (const reminder of pendingReminders) {
+                await this.executeReminder(reminder);
+            }
+        } catch (error) {
+            console.error('檢查待執行提醒時發生錯誤:', error);
+        }
+    }
+
+    /**
+     * 執行單個提醒
+     */
+    async executeReminder(reminder) {
+        try {
+            console.log(`執行提醒: ${reminder.title} (ID: ${reminder.id})`);
+
+            // 發送通知
+            await notificationService.sendReminderNotification(reminder);
+
+            // 更新下次執行時間
+            await reminderService.updateReminderNextRun(reminder.id);
+
+            console.log(`提醒執行完成: ${reminder.title}`);
+        } catch (error) {
+            console.error(`執行提醒失敗 (ID: ${reminder.id}):`, error);
+        }
+    }
+
+    /**
+     * 添加特定時間的排程任務
+     */
+    scheduleSpecificReminder(reminder) {
+        if (reminder.reminderType !== 'once') {
+            return; // 只處理一次性提醒的精確排程
+        }
+
+        const scheduleTime = new Date(reminder.scheduledTime);
+        const now = new Date();
+
+        if (scheduleTime <= now) {
+            return; // 時間已過，由主排程器處理
+        }
+
+        const taskId = `reminder_${reminder.id}`;
+        
+        // 如果已存在，先移除舊任務
+        if (this.scheduledTasks.has(taskId)) {
+            this.scheduledTasks.get(taskId).destroy();
+        }
+
+        // 計算 cron 表達式
+        const minute = scheduleTime.getMinutes();
+        const hour = scheduleTime.getHours();
+        const day = scheduleTime.getDate();
+        const month = scheduleTime.getMonth() + 1;
+        const cronExpression = `${minute} ${hour} ${day} ${month} *`;
+
+        // 創建新任務
+        const task = cron.schedule(cronExpression, async () => {
+            await this.executeReminder(reminder);
+            // 執行後移除任務
+            this.scheduledTasks.delete(taskId);
+        }, {
+            scheduled: true,
+            timezone: 'Asia/Taipei'
+        });
+
+        this.scheduledTasks.set(taskId, task);
+        console.log(`已排程提醒: ${reminder.title} 於 ${scheduleTime.toLocaleString()}`);
+    }
+
+    /**
+     * 取消特定提醒的排程
+     */
+    cancelScheduledReminder(reminderId) {
+        const taskId = `reminder_${reminderId}`;
+        
+        if (this.scheduledTasks.has(taskId)) {
+            this.scheduledTasks.get(taskId).destroy();
+            this.scheduledTasks.delete(taskId);
+            console.log(`已取消提醒排程: ${reminderId}`);
+            return true;
+        }
+        
         return false;
-      }
     }
 
-    return true;
-  }
-
-  /**
-   * 發送提醒訊息
-   * @param {Object} reminder - 提醒物件
-   */
-  async sendReminder(reminder) {
-    try {
-      const message = this.formatReminderMessage(reminder);
-      
-      await this.client.pushMessage(reminder.userId, {
-        type: 'text',
-        text: message
-      });
-      
-      console.log(`📨 提醒已發送給用戶 ${reminder.userId}: ${reminder.title}`);
-    } catch (error) {
-      console.error(`❌ 發送提醒失敗 (${reminder.id}):`, error);
+    /**
+     * 獲取排程器狀態
+     */
+    getStatus() {
+        return {
+            isRunning: this.isRunning,
+            scheduledTasksCount: this.scheduledTasks.size,
+            scheduledTasks: Array.from(this.scheduledTasks.keys())
+        };
     }
-  }
 
-  /**
-   * 格式化提醒訊息
-   * @param {Object} reminder - 提醒物件
-   * @returns {string} 格式化後的訊息
-   */
-  formatReminderMessage(reminder) {
-    const isJapanese = reminder.language === 'ja';
-    
-    let message = '';
-    
-    if (isJapanese) {
-      message = `⏰ リマインド\n\n📝 ${reminder.title}`;
-      
-      if (reminder.description) {
-        message += `\n💭 ${reminder.description}`;
-      }
-      
-      // 添加提醒類型信息
-      switch (reminder.type) {
-        case 'daily':
-          message += '\n🔄 毎日のリマインドです';
-          break;
-        case 'weekly':
-          message += '\n🔄 毎週のリマインドです';
-          break;
-        case 'monthly':
-          message += '\n🔄 毎月のリマインドです';
-          break;
-        case 'custom':
-          message += `\n🔄 ${reminder.intervalDays}日ごとのリマインドです`;
-          break;
-        default:
-          message += '\n📅 一回限りのリマインドです';
-      }
-      
-      message += '\n\n完了したい場合は「リマインド削除 ' + reminder.id + '」と入力してください';
-    } else {
-      message = `⏰ 提醒通知\n\n📝 ${reminder.title}`;
-      
-      if (reminder.description) {
-        message += `\n💭 ${reminder.description}`;
-      }
-      
-      // 添加提醒類型信息
-      switch (reminder.type) {
-        case 'daily':
-          message += '\n🔄 這是每日提醒';
-          break;
-        case 'weekly':
-          message += '\n🔄 這是每週提醒';
-          break;
-        case 'monthly':
-          message += '\n🔄 這是每月提醒';
-          break;
-        case 'custom':
-          message += `\n🔄 這是每${reminder.intervalDays}天的提醒`;
-          break;
-        default:
-          message += '\n📅 這是一次性提醒';
-      }
-      
-      message += '\n\n如要取消請輸入「刪除提醒 ' + reminder.id + '」';
+    /**
+     * 手動觸發檢查
+     */
+    async manualCheck() {
+        console.log('手動觸發提醒檢查...');
+        await this.checkAndExecuteReminders();
     }
-    
-    return message;
-  }
 
-  /**
-   * 提醒觸發後更新狀態
-   * @param {Object} reminder - 提醒物件
-   */
-  async updateReminderAfterTrigger(reminder) {
-    try {
-      const now = new Date();
-      
-      // 更新最後觸發時間
-      reminder.lastTriggered = now.toISOString();
-      
-      // 計算下次提醒時間
-      const nextReminderTime = this.calculateNextReminderTime(reminder, now);
-      
-      if (nextReminderTime) {
-        // 更新下次提醒時間
-        reminder.reminderTime = nextReminderTime.toISOString();
-        await this.todoService.updateReminder(reminder.id, reminder);
-        
-        console.log(`📅 已更新提醒 ${reminder.id} 的下次觸發時間: ${nextReminderTime.toISOString()}`);
-      } else {
-        // 一次性提醒，標記為已完成
-        await this.todoService.completeReminder(reminder.id);
-        
-        console.log(`✅ 一次性提醒 ${reminder.id} 已完成`);
-      }
-    } catch (error) {
-      console.error(`❌ 更新提醒狀態失敗 (${reminder.id}):`, error);
+    /**
+     * 批量添加提醒到排程器
+     */
+    async loadAllReminders() {
+        try {
+            console.log('載入所有提醒到排程器...');
+            
+            // 這裡可以實作載入所有未來的一次性提醒
+            // 由於我們主要依賴主排程器，這個方法用於優化性能
+            
+            console.log('提醒載入完成');
+        } catch (error) {
+            console.error('載入提醒失敗:', error);
+        }
     }
-  }
 
-  /**
-   * 計算下次提醒時間
-   * @param {Object} reminder - 提醒物件
-   * @param {Date} currentTime - 當前時間
-   * @returns {Date|null} 下次提醒時間，如果是一次性提醒則返回 null
-   */
-  calculateNextReminderTime(reminder, currentTime) {
-    const current = new Date(currentTime);
-    
-    switch (reminder.type) {
-      case 'daily':
-        // 每日提醒：加一天
-        return new Date(current.getTime() + 24 * 60 * 60 * 1000);
-        
-      case 'weekly':
-        // 每週提醒：加七天
-        return new Date(current.getTime() + 7 * 24 * 60 * 60 * 1000);
-        
-      case 'monthly':
-        // 每月提醒：加一個月
-        const nextMonth = new Date(current);
-        nextMonth.setMonth(current.getMonth() + 1);
-        return nextMonth;
-        
-      case 'custom':
-        // 自定義間隔：加指定天數
-        const intervalMs = (reminder.intervalDays || 1) * 24 * 60 * 60 * 1000;
-        return new Date(current.getTime() + intervalMs);
-        
-      default:
-        // 一次性提醒
-        return null;
+    /**
+     * 清理過期的排程任務
+     */
+    cleanupExpiredTasks() {
+        const now = new Date();
+        let cleanedCount = 0;
+
+        this.scheduledTasks.forEach((task, taskId) => {
+            // 這裡可以實作更複雜的過期檢查邏輯
+            // 目前由 cron 任務自動處理
+        });
+
+        if (cleanedCount > 0) {
+            console.log(`清理了 ${cleanedCount} 個過期的排程任務`);
+        }
     }
-  }
 
-  /**
-   * 獲取排程器狀態
-   */
-  getStatus() {
-    return {
-      isRunning: this.isRunning,
-      checkInterval: config.reminder.checkInterval,
-      lastCheck: new Date().toISOString()
-    };
-  }
+    /**
+     * 獲取下一次執行時間
+     */
+    getNextExecutionTime(cronExpression) {
+        try {
+            const task = cron.schedule(cronExpression, () => {}, { scheduled: false });
+            // 這是一個簡化的實作，實際可能需要更複雜的邏輯
+            task.destroy();
+            return null;
+        } catch (error) {
+            console.error('計算下次執行時間失敗:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 驗證 cron 表達式
+     */
+    validateCronExpression(cronExpression) {
+        try {
+            const task = cron.schedule(cronExpression, () => {}, { scheduled: false });
+            task.destroy();
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
 }
 
-module.exports = ReminderScheduler;
+module.exports = new ReminderScheduler();
