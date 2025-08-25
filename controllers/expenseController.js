@@ -319,9 +319,56 @@ class TodoController {
   }
 
   /**
+   * 刪除提醒事項
+   */
+  async deleteReminder(parsedCommand) {
+    // 這個方法需要在 reminderSheetService 中實作
+    const result = await this.reminderService.deleteReminder(
+      parsedCommand.userId, 
+      parsedCommand.reminderId
+    );
+
+    const isJapanese = parsedCommand.language === 'ja';
+    return isJapanese ?
+      `🗑️ リマインダーを削除しました\nID: ${result.id}` :
+      `🗑️ 提醒已刪除\nID: ${result.id}`;
+  }
+
+  /**
    * 取得狀態 emoji
    */
   getStatusEmoji(status) {
     const statusEmojis = {
       'pending': '⏳',
-      'in_progress
+      'in_progress': '🔄',
+      'completed': '✅',
+      'cancelled': '❌'
+    };
+    return statusEmojis[status] || '❓';
+  }
+
+  /**
+   * 取得優先級 emoji
+   */
+  getPriorityEmoji(priority) {
+    const priorityEmojis = {
+      'high': '🔴',
+      'medium': '🟡',
+      'low': '🟢'
+    };
+    return priorityEmojis[priority] || '⚪';
+  }
+
+  /**
+   * 取得幫助訊息
+   */
+  getHelpMessage(language = 'zh-tw') {
+    if (language === 'ja') {
+      return `📚 ToDo機能ヘルプ\n\n📝 ToDo追加:\n• Todo追加 タイトル [説明]\n例: Todo追加 買い物 牛乳とパンを買う\n\n📋 ToDo確認:\n• Todoリスト\n• 完了リスト\n• 未完了リスト\n\n✅ ToDo完了:\n• Todo完了 ID\n例: Todo完了 todo_123\n\n🗑️ ToDo削除:\n• Todo削除 ID\n例: Todo削除 todo_123\n\n⏰ リマインダー:\n• リマインダー追加 タイトル 時間\n例: リマインダー追加 会議 2024-01-15 14:00\n• リマインダーリスト\n• リマインダー削除 ID`;
+    }
+    
+    return `📚 待辦功能說明\n\n📝 新增待辦:\n• 新增待辦 標題 [說明]\n例: 新增待辦 買菜 購買晚餐食材\n\n📋 查看待辦:\n• 待辦清單\n• 已完成清單\n• 待處理清單\n\n✅ 完成待辦:\n• 完成待辦 ID\n例: 完成待辦 todo_123\n\n🗑️ 刪除待辦:\n• 刪除待辦 ID\n例: 刪除待辦 todo_123\n\n⏰ 提醒功能:\n• 新增提醒 標題 時間\n例: 新增提醒 開會 2024-01-15 14:00\n• 提醒清單\n• 刪除提醒 ID`;
+  }
+}
+
+module.exports = TodoController
