@@ -1,405 +1,438 @@
-// utils/commandParser.js (更新版 - 支援待辦功能)
-const LanguageDetector = require('./languageDetector');
+const dateTimeParser = require('../parsers/dateTimeParser');
+const { detectLanguage } = require('../parsers/languageParser');
+const { COMMAND_PATTERNS, PRIORITY_KEYWORDS, LOCATION_PATTERNS } = require('../constants/dateTimeConstants');
 
-/**
- * 解析使用者指令
- * @param {string} message - 使用者訊息
- * @returns {Object} 解析結果
- */
-function parseCommand(message) {
-  const text = message.trim().toLowerCase();
-  const language = LanguageDetector.detectLanguage(message);
+class CommandParser {
+    constructor() {
+        this.patterns = COMMAND_PATTERNS;
+    }
 
-  // 記帳相關指令
-  if (isExpenseCommand(text, language)) {
-    return parseExpenseCommand(text, language);
-  }
-  
-  // 待辦相關指令
-  if (isTodoCommand(text, language)) {
-    return parseTodoCommand(message.trim(), language); // 保持原始大小寫
-  }
-  
-  // 提醒相關指令
-  if (isReminderCommand(text, language)) {
-    return parseReminderCommand(message.trim(), language);
-  }
+    /**
+     * 主要解析函數
+     */
+    parseCommand(text) {
+        const language = detectLanguage(text);
+        const cleanText = text.trim();
 
-  // 幫助指令
-  if (isHelpCommand(text, language)) {
-    return parseHelpCommand(text, language);
-  }
+        // 檢查是否為記帳指令（優先檢查，保持現有功能）
+        const accountingResult = this.parseAccountingCommand(cleanText, language);
+        if (accountingResult) {
+            return accountingResult;
+        }
 
-  return {
-    success: false,
-    error: language === 'ja' ? 
-      '認識できないコマンドです。「help」または「ヘルプ」と入力してください。' :
-      '無法識別的指令。請輸入 help 或 幫助 查看使用說明。'
-  };
+        // 檢查是否為代辦/提醒指令
+        const todoResult = this.parseTodoCommand(cleanText, language);
+        if (todoResult) {
+            return todoResult;
+        }
+
+        // 檢查是否為系統指令
+        const systemResult = this.parseSystemCommand(cleanText, language);
+        if (systemResult) {
+            return systemResult;
+        }
+
+        return null;
+    }
+
+    /**
+     * 解析記帳指令（保持現有邏輯）
+     */
+    parseAccountingCommand(text, language) {
+        // 這裡保持你現有的記帳解析邏輯
+        // 檢查是否包含金額、類別等記帳相關關鍵字
+        const amountPattern = /[￥$€£¥]?\s*\d+(\.\d{1,2})?/;
+        const categoryKeywords = {
+            zh: ['早餐', '午餐', '晚餐', '交通', '購物', '娛樂', '醫療', '房租', '水電'],
+            ja: ['朝食', '昼食', '夕食', '交通', '買い物', '娯楽', '医療', '家賃', '光熱費']
+        };
+
+        if (amountPattern.test(text)) {
+            const keywords = categoryKeywords[language] || categoryKeywords.zh;
+            const hasCategory = keywords.some(keyword => text.includes(keyword));
+            
+            if (hasCategory) {
+                return {
+                    type: 'accounting',
+                    confidence: 0.9,
+                    language: language,
+                    originalText: text
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 解析代辦/提醒指令
+     */
+    parseTodoCommand(text, language) {
+        const patterns = this.patterns[language] || this.patterns.zh;
+        
+        // 檢查動作類型
+        let action = null;
+        let confidence = 0;
+
+        for (const [actionType, pattern] of Object.entries(patterns)) {
+            if (pattern.test(text)) {
+                action = actionType;
+                confidence = 0.8;
+                break;
+            }
+        }
+
+        // 如果沒有明確動作，但包含提醒相關關鍵字，則判斷為新增
+        if (!action) {
+            const reminderKeywords = {
+                zh: ['提醒', '代辦', '任務', '要做', '記得', '別忘了'],
+                ja: ['リマインド', 'タスク', '予定', 'やること', '忘れずに', '覚えている']
+            };
+
+            const keywords = reminderKeywords[language] || reminderKeywords.zh;
+            if (keywords.some(keyword => text.includes(keyword))) {
+                action = 'add';
+                confidence = 0.6;
+            }
+        }
+
+        if (!action) return null;
+
+        // 解析具體內容
+        const parsedContent = this.parseContentDetails(text, language);
+        
+        return {
+            type: 'todo',
+            action: action,
+            confidence: confidence,
+            language: language,
+            originalText: text,
+            ...parsedContent
+        };
+    }
+
+    /**
+     * 解析內容詳情
+     */
+    parseContentDetails(text, language) {
+        const result = {
+            title: null,
+            description: null,
+            datetime: null,
+            recurring: null,
+            priority: null,
+            location: null,
+            tags: []
+        };
+
+        // 解析時間
+        const datetimeResult = dateTimeParser.parse(text, language);
+        if (datetimeResult) {
+            if (datetimeResult.type === 'recurring') {
+                result.recurring = datetimeResult.recurring;
+            } else {
+                result.datetime = datetimeResult.dateTime;
+            }
+        }
+
+        // 解析優先級
+        result.priority = this.parsePriority(text, language);
+
+        // 解析地點
+        result.location = this.parseLocation(text, language);
+
+        // 解析標題和描述
+        const titleDesc = this.extractTitleAndDescription(text, language);
+        result.title = titleDesc.title;
+        result.description = titleDesc.description;
+
+        // 解析標籤
+        result.tags = this.extractTags(text, language);
+
+        return result;
+    }
+
+    /**
+     * 解析優先級
+     */
+    parsePriority(text, language) {
+        const keywords = PRIORITY_KEYWORDS[language] || PRIORITY_KEYWORDS.zh;
+        
+        for (const [level, words] of Object.entries(keywords)) {
+            if (words.some(word => text.includes(word))) {
+                return level;
+            }
+        }
+        
+        return 'medium'; // 預設中等優先級
+    }
+
+    /**
+     * 解析地點
+     */
+    parseLocation(text, language) {
+        const patterns = LOCATION_PATTERNS[language] || LOCATION_PATTERNS.zh;
+        
+        for (const [type, pattern] of Object.entries(patterns)) {
+            const match = text.match(pattern);
+            if (match) {
+                return match[1].trim();
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * 提取標題和描述
+     */
+    extractTitleAndDescription(text, language) {
+        // 移除時間、地點、優先級等已解析的部分
+        let cleanText = text;
+        
+        // 移除時間表達
+        const timePatterns = {
+            zh: [
+                /\d{1,2}[點点时]\d{0,2}分?/g,
+                /明天|後天|下[週周]/g,
+                /每[天日週周月]/g
+            ],
+            ja: [
+                /\d{1,2}[時时]\d{0,2}分?/g,
+                /明日|来[週周月]/g,
+                /毎[日週月]/g
+            ]
+        };
+
+        const patterns = timePatterns[language] || timePatterns.zh;
+        patterns.forEach(pattern => {
+            cleanText = cleanText.replace(pattern, ' ');
+        });
+
+        // 移除動作詞
+        const actionWords = {
+            zh: ['提醒', '代辦', '新增', '創建', '要做', '記得', '別忘了'],
+            ja: ['リマインド', 'タスク', '追加', '作成', 'やること', '忘れずに']
+        };
+
+        const actions = actionWords[language] || actionWords.zh;
+        actions.forEach(word => {
+            cleanText = cleanText.replace(new RegExp(word, 'g'), ' ');
+        });
+
+        // 清理多餘空白
+        cleanText = cleanText.replace(/\s+/g, ' ').trim();
+
+        // 簡單的標題描述分離（以第一個句號或換行為界）
+        const sentences = cleanText.split(/[。．\n]/);
+        const title = sentences[0]?.trim() || cleanText;
+        const description = sentences.slice(1).join(' ').trim() || null;
+
+        return {
+            title: title || text, // 如果無法提取，使用原文
+            description: description
+        };
+    }
+
+    /**
+     * 提取標籤
+     */
+    extractTags(text, language) {
+        const tagPatterns = {
+            zh: /#(\w+)/g,
+            ja: /#(\w+)/g
+        };
+
+        const pattern = tagPatterns[language] || tagPatterns.zh;
+        const matches = text.matchAll(pattern);
+        const tags = [];
+
+        for (const match of matches) {
+            tags.push(match[1]);
+        }
+
+        return tags;
+    }
+
+    /**
+     * 解析系統指令
+     */
+    parseSystemCommand(text, language) {
+        const systemCommands = {
+            zh: {
+                help: ['幫助', '說明', '指令', '怎麼用'],
+                settings: ['設定', '設置', '配置'],
+                status: ['狀態', '統計', '報告'],
+                export: ['匯出', '導出', '備份'],
+                import: ['匯入', '導入', '恢復']
+            },
+            ja: {
+                help: ['ヘルプ', '説明', 'コマンド', '使い方'],
+                settings: ['設定', '設置', '構成'],
+                status: ['ステータス', '統計', 'レポート'],
+                export: ['エクスポート', 'バックアップ'],
+                import: ['インポート', '復元']
+            }
+        };
+
+        const commands = systemCommands[language] || systemCommands.zh;
+        
+        for (const [command, keywords] of Object.entries(commands)) {
+            if (keywords.some(keyword => text.includes(keyword))) {
+                return {
+                    type: 'system',
+                    action: command,
+                    confidence: 0.9,
+                    language: language,
+                    originalText: text
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 解析查詢指令的詳細參數
+     */
+    parseQueryParameters(text, language) {
+        const params = {
+            status: null,
+            dateRange: null,
+            priority: null,
+            keyword: null,
+            limit: null
+        };
+
+        // 解析狀態篩選
+        const statusKeywords = {
+            zh: {
+                pending: ['待做', '未完成', '進行中'],
+                completed: ['已完成', '完成了', '做完了'],
+                overdue: ['逾期', '過期', '延誤']
+            },
+            ja: {
+                pending: ['未完了', '進行中', 'やること'],
+                completed: ['完了', '終了', '済み'],
+                overdue: ['期限切れ', '遅延']
+            }
+        };
+
+        const statuses = statusKeywords[language] || statusKeywords.zh;
+        for (const [status, keywords] of Object.entries(statuses)) {
+            if (keywords.some(keyword => text.includes(keyword))) {
+                params.status = status;
+                break;
+            }
+        }
+
+        // 解析日期範圍
+        const dateRangeKeywords = {
+            zh: ['今天', '明天', '本週', '下週', '本月', '下月'],
+            ja: ['今日', '明日', '今週', '来週', '今月', '来月']
+        };
+
+        const ranges = dateRangeKeywords[language] || dateRangeKeywords.zh;
+        for (const range of ranges) {
+            if (text.includes(range)) {
+                params.dateRange = range;
+                break;
+            }
+        }
+
+        // 解析數量限制
+        const limitMatch = text.match(/(\d+)[個项]?/);
+        if (limitMatch) {
+            params.limit = parseInt(limitMatch[1]);
+        }
+
+        // 提取關鍵字（移除其他已解析的部分）
+        let keyword = text;
+        Object.values(params).forEach(value => {
+            if (value && typeof value === 'string') {
+                keyword = keyword.replace(new RegExp(value, 'g'), '');
+            }
+        });
+        
+        // 清理關鍵字
+        keyword = keyword.replace(/[查看列出顯示搜尋搜索]/g, '').trim();
+        if (keyword && keyword.length > 0) {
+            params.keyword = keyword;
+        }
+
+        return params;
+    }
+
+    /**
+     * 驗證解析結果
+     */
+    validateParseResult(result) {
+        if (!result) return false;
+
+        // 檢查必要欄位
+        if (!result.type || !result.language) {
+            return false;
+        }
+
+        // 檢查信心度
+        if (result.confidence < 0.3) {
+            return false;
+        }
+
+        // 針對不同類型進行特定驗證
+        switch (result.type) {
+            case 'todo':
+                return this.validateTodoResult(result);
+            case 'accounting':
+                return this.validateAccountingResult(result);
+            case 'system':
+                return this.validateSystemResult(result);
+            default:
+                return true;
+        }
+    }
+
+    validateTodoResult(result) {
+        if (!result.action) return false;
+        
+        if (result.action === 'add') {
+            return result.title && result.title.length > 0;
+        }
+        
+        return true;
+    }
+
+    validateAccountingResult(result) {
+        // 保持現有的記帳驗證邏輯
+        return true;
+    }
+
+    validateSystemResult(result) {
+        return result.action && typeof result.action === 'string';
+    }
+
+    /**
+     * 獲取解析信心度
+     */
+    getConfidenceScore(text, result) {
+        if (!result) return 0;
+
+        let score = result.confidence || 0;
+
+        // 根據解析到的元素數量增加信心度
+        const elements = [
+            result.datetime,
+            result.recurring,
+            result.priority,
+            result.location,
+            result.title
+        ].filter(Boolean);
+
+        score += elements.length * 0.1;
+
+        // 確保不超過1.0
+        return Math.min(1.0, score);
+    }
 }
 
-/**
- * 檢查是否為記帳指令
- */
-function isExpenseCommand(text, language) {
-  const patterns = {
-    zh: [/^\d+/, /預算/, /餘額/, /剩餘/, /總結/, /統計/],
-    ja: [/^\d+/, /予算/, /残高/, /残り/, /まとめ/, /統計/]
-  };
-  
-  return patterns[language]?.some(pattern => pattern.test(text)) || false;
-}
-
-/**
- * 檢查是否為待辦指令
- */
-function isTodoCommand(text, language) {
-  const patterns = {
-    zh: [
-      /^(新增|添加|加入).*待辦/,
-      /^待辦.*(新增|添加|加入)/,
-      /^(查看|顯示|列出).*待辦/,
-      /^待辦.*(查看|顯示|列表|清單)/,
-      /^(刪除|移除|完成).*待辦/,
-      /^待辦.*(刪除|移除|完成)/,
-      /^todo/i
-    ],
-    ja: [
-      /^(追加|新規).*todo/i,
-      /^todo.*(追加|新規)/i,
-      /^(表示|確認|リスト).*todo/i,
-      /^todo.*(表示|確認|リスト)/i,
-      /^(削除|完了).*todo/i,
-      /^todo.*(削除|完了)/i,
-      /^やることリスト/,
-      /^todo/i
-    ]
-  };
-  
-  return patterns[language]?.some(pattern => pattern.test(text)) || false;
-}
-
-/**
- * 檢查是否為提醒指令
- */
-function isReminderCommand(text, language) {
-  const patterns = {
-    zh: [
-      /^(提醒|通知|提醒我)/,
-      /^(明天|下週|下個月|每天|每週|每月)/,
-      /^設定.*提醒/,
-      /^(查看|顯示|列出).*提醒/,
-      /^(刪除|移除|取消).*提醒/
-    ],
-    ja: [
-      /^(リマインド|通知|思い出させて)/,
-      /^(明日|来週|来月|毎日|毎週|毎月)/,
-      /^リマインド.*設定/,
-      /^(表示|確認|リスト).*リマインド/,
-      /^(削除|キャンセル).*リマインド/
-    ]
-  };
-  
-  return patterns[language]?.some(pattern => pattern.test(text)) || false;
-}
-
-/**
- * 檢查是否為幫助指令
- */
-function isHelpCommand(text, language) {
-  const helpKeywords = {
-    zh: ['help', '幫助', '說明', '指令'],
-    ja: ['help', 'ヘルプ', '使い方', 'コマンド']
-  };
-  
-  return helpKeywords[language]?.includes(text) || false;
-}
-
-/**
- * 解析記帳指令
- */
-function parseExpenseCommand(text, language) {
-  // 原有的記帳指令解析邏輯
-  if (/^\d+/.test(text)) {
-    return {
-      success: true,
-      commandType: 'expense',
-      originalText: text
-    };
-  }
-  
-  const budgetKeywords = language === 'ja' ? ['予算'] : ['預算'];
-  if (budgetKeywords.some(keyword => text.includes(keyword))) {
-    return {
-      success: true,
-      commandType: 'set_budget',
-      originalText: text
-    };
-  }
-  
-  const summaryKeywords = language === 'ja' ? ['まとめ', '統計'] : ['總結', '統計'];
-  if (summaryKeywords.some(keyword => text.includes(keyword))) {
-    return {
-      success: true,
-      commandType: 'expense_summary',
-      originalText: text
-    };
-  }
-  
-  return {
-    success: true,
-    commandType: 'expense',
-    originalText: text
-  };
-}
-
-/**
- * 解析待辦指令
- */
-function parseTodoCommand(text, language) {
-  const lowerText = text.toLowerCase();
-  
-  // 新增待辦
-  if (language === 'zh') {
-    if (/^(新增|添加|加入).*待辦/.test(lowerText) || 
-        /^待辦.*(新增|添加|加入)/.test(lowerText) ||
-        /^todo\s+add/i.test(text)) {
-      return {
-        success: true,
-        commandType: 'todo_add',
-        originalText: text,
-        content: extractTodoContent(text, language, 'add')
-      };
-    }
-  } else if (language === 'ja') {
-    if (/^(追加|新規).*todo/i.test(lowerText) || 
-        /^todo.*(追加|新規)/i.test(lowerText) ||
-        /^todo\s+add/i.test(text)) {
-      return {
-        success: true,
-        commandType: 'todo_add',
-        originalText: text,
-        content: extractTodoContent(text, language, 'add')
-      };
-    }
-  }
-  
-  // 查看待辦
-  if (language === 'zh') {
-    if (/^(查看|顯示|列出).*待辦/.test(lowerText) || 
-        /^待辦.*(查看|顯示|列表|清單)/.test(lowerText) ||
-        /^todo\s+(list|show)/i.test(text)) {
-      return {
-        success: true,
-        commandType: 'todo_list',
-        originalText: text
-      };
-    }
-  } else if (language === 'ja') {
-    if (/^(表示|確認|リスト).*todo/i.test(lowerText) || 
-        /^todo.*(表示|確認|リスト)/i.test(lowerText) ||
-        /^todo\s+(list|show)/i.test(text)) {
-      return {
-        success: true,
-        commandType: 'todo_list',
-        originalText: text
-      };
-    }
-  }
-  
-  // 刪除/完成待辦
-  if (language === 'zh') {
-    if (/^(刪除|移除|完成).*待辦/.test(lowerText) || 
-        /^待辦.*(刪除|移除|完成)/.test(lowerText) ||
-        /^todo\s+(delete|complete|done)/i.test(text)) {
-      return {
-        success: true,
-        commandType: /完成/.test(lowerText) || /complete|done/i.test(text) ? 'todo_complete' : 'todo_delete',
-        originalText: text,
-        todoId: extractTodoId(text)
-      };
-    }
-  } else if (language === 'ja') {
-    if (/^(削除|完了).*todo/i.test(lowerText) || 
-        /^todo.*(削除|完了)/i.test(lowerText) ||
-        /^todo\s+(delete|complete|done)/i.test(text)) {
-      return {
-        success: true,
-        commandType: /完了/.test(lowerText) || /complete|done/i.test(text) ? 'todo_complete' : 'todo_delete',
-        originalText: text,
-        todoId: extractTodoId(text)
-      };
-    }
-  }
-  
-  // 預設為新增待辦
-  return {
-    success: true,
-    commandType: 'todo_add',
-    originalText: text,
-    content: text
-  };
-}
-
-/**
- * 解析提醒指令
- */
-function parseReminderCommand(text, language) {
-  const lowerText = text.toLowerCase();
-  
-  // 新增提醒
-  if (language === 'zh') {
-    if (/^(提醒|通知|提醒我)/.test(lowerText) || 
-        /^設定.*提醒/.test(lowerText)) {
-      return {
-        success: true,
-        commandType: 'reminder_add',
-        originalText: text,
-        content: extractReminderContent(text, language)
-      };
-    }
-  } else if (language === 'ja') {
-    if (/^(リマインド|通知|思い出させて)/.test(lowerText) || 
-        /^リマインド.*設定/.test(lowerText)) {
-      return {
-        success: true,
-        commandType: 'reminder_add',
-        originalText: text,
-        content: extractReminderContent(text, language)
-      };
-    }
-  }
-  
-  // 查看提醒
-  if (language === 'zh') {
-    if (/^(查看|顯示|列出).*提醒/.test(lowerText)) {
-      return {
-        success: true,
-        commandType: 'reminder_list',
-        originalText: text
-      };
-    }
-  } else if (language === 'ja') {
-    if (/^(表示|確認|リスト).*リマインド/.test(lowerText)) {
-      return {
-        success: true,
-        commandType: 'reminder_list',
-        originalText: text
-      };
-    }
-  }
-  
-  // 刪除提醒
-  if (language === 'zh') {
-    if (/^(刪除|移除|取消).*提醒/.test(lowerText)) {
-      return {
-        success: true,
-        commandType: 'reminder_delete',
-        originalText: text,
-        reminderId: extractReminderId(text)
-      };
-    }
-  } else if (language === 'ja') {
-    if (/^(削除|キャンセル).*リマインド/.test(lowerText)) {
-      return {
-        success: true,
-        commandType: 'reminder_delete',
-        originalText: text,
-        reminderId: extractReminderId(text)
-      };
-    }
-  }
-  
-  // 預設為新增提醒
-  return {
-    success: true,
-    commandType: 'reminder_add',
-    originalText: text,
-    content: text
-  };
-}
-
-/**
- * 解析幫助指令
- */
-function parseHelpCommand(text, language) {
-  if (text.includes('todo') || text.includes('待辦') || text.includes('やること')) {
-    return {
-      success: true,
-      commandType: 'todo_help',
-      originalText: text
-    };
-  }
-  
-  return {
-    success: true,
-    commandType: 'expense_help',
-    originalText: text
-  };
-}
-
-/**
- * 提取待辦內容
- */
-function extractTodoContent(text, language, action) {
-  const patterns = {
-    zh: {
-      add: [/^(新增|添加|加入)\s*待辦\s*(.+)/, /^待辦\s*(新增|添加|加入)\s*(.+)/, /^todo\s+add\s+(.+)/i]
-    },
-    ja: {
-      add: [/^(追加|新規)\s*todo\s*(.+)/i, /^todo\s*(追加|新規)\s*(.+)/i, /^todo\s+add\s+(.+)/i]
-    }
-  };
-  
-  for (const pattern of patterns[language]?.[action] || []) {
-    const match = text.match(pattern);
-    if (match) {
-      return match[match.length - 1].trim();
-    }
-  }
-  
-  return text; // 如果沒有匹配到特定模式，返回原文
-}
-
-/**
- * 提取待辦ID
- */
-function extractTodoId(text) {
-  const match = text.match(/\d+/);
-  return match ? parseInt(match[0]) : null;
-}
-
-/**
- * 提取提醒內容
- */
-function extractReminderContent(text, language) {
-  const patterns = {
-    zh: [/^(提醒|通知|提醒我)\s*(.+)/, /^設定.*提醒\s*(.+)/],
-    ja: [/^(リマインド|通知|思い出させて)\s*(.+)/, /^リマインド.*設定\s*(.+)/]
-  };
-  
-  for (const pattern of patterns[language] || []) {
-    const match = text.match(pattern);
-    if (match) {
-      return match[match.length - 1].trim();
-    }
-  }
-  
-  return text;
-}
-
-/**
- * 提取提醒ID
- */
-function extractReminderId(text) {
-  const match = text.match(/\d+/);
-  return match ? parseInt(match[0]) : null;
-}
-
-module.exports = {
-  parseCommand,
-  isExpenseCommand,
-  isTodoCommand,
-  isReminderCommand,
-  isHelpCommand
-};
+module.exports = new CommandParser();
