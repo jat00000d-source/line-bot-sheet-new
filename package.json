@@ -1,34 +1,26 @@
 {
-  "name": "line-todo-reminder-bot",
+  "name": "line-bot-accounting",
   "version": "1.0.0",
-  "description": "LINE Bot with accounting, todo and reminder features",
+  "description": "LINE Bot for accounting with Google Sheets",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "dependencies": {
-    "@line/bot-sdk": "^7.5.2",
-    "express": "^4.18.2",
-    "google-spreadsheet": "^3.3.0",
-    "google-auth-library": "^8.7.0",
-    "node-cron": "^3.0.2",
-    "dotenv": "^16.0.3"
-  },
-  "devDependencies": {
-    "nodemon": "^2.0.20"
-  },
   "engines": {
     "node": ">=16.0.0"
   },
-  "keywords": [
-    "line-bot",
-    "reminder",
-    "todo",
-    "accounting",
-    "google-sheets"
-  ],
+  "dependencies": {
+    "@line/bot-sdk": "^7.5.2",
+    "express": "^4.18.2",
+    "googleapis": "^126.0.1",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": ["line-bot", "accounting", "google-sheets"],
   "author": "Your Name",
   "license": "MIT"
 }
