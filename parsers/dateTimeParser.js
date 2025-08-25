@@ -1,727 +1,291 @@
-const { DATETIME_PATTERNS } = require('../constants/dateTimeConstants');
+// parsers/dateTimeParser.js - 修復版本
+const { LANGUAGES } = require('../constants/todoMessages');
 
 class DateTimeParser {
     constructor() {
-        this.patterns = DATETIME_PATTERNS;
-    }
-
-    /**
-     * 驗證日期時間是否有效
-     */
-    isValidDateTime(dateTime) {
-        if (!dateTime || !(dateTime instanceof Date)) {
-            return false;
-        }
-        
-        if (isNaN(dateTime.getTime())) {
-            return false;
-        }
-        
-        // 檢查是否為未來時間（允許5分鐘的誤差）
-        const now = new Date();
-        const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
-        
-        return dateTime > fiveMinutesAgo;
-    }
-
-    /**
-     * 解析週期性提醒的特殊邏輯
-     */
-    parseRecurringReminder(text, language = 'zh') {
-        const patterns = {
-            zh: [
-                {
-                    regex: /每天\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                    parser: (match) => ({
-                        type: 'daily',
-                        time: {
-                            hour: parseInt(match[1]),
-                            minute: parseInt(match[2]) || 0
-                        }
-                    })
-                },
-                {
-                    regex: /每[週周]([一二三四五六日天,、\s]+)\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                    parser: (match) => {
-                        const weekdayMap = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0};
-                        const weekdayText = match[1];
-                        const weekdays = [];
-                        
-                        Object.keys(weekdayMap).forEach(day => {
-                            if (weekdayText.includes(day)) {
-                                weekdays.push(weekdayMap[day]);
-                            }
-                        });
-                        
-                        return {
-                            type: 'weekly',
-                            weekdays: weekdays,
-                            time: {
-                                hour: parseInt(match[2]),
-                                minute: parseInt(match[3]) || 0
-                            }
-                        };
-                    }
-                },
-                {
-                    regex: /每月(\d{1,2})[號号日]\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                    parser: (match) => ({
-                        type: 'monthly',
-                        monthDay: parseInt(match[1]),
-                        time: {
-                            hour: parseInt(match[2]),
-                            minute: parseInt(match[3]) || 0
-                        }
-                    })
-                },
-                {
-                    regex: /每(\d+)[天日]\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                    parser: (match) => ({
-                        type: 'custom',
-                        interval: parseInt(match[1]),
-                        time: {
-                            hour: parseInt(match[2]),
-                            minute: parseInt(match[3]) || 0
-                        }
-                    })
-                }
-            ],
-            ja: [
-                {
-                    regex: /毎日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
-                    parser: (match) => ({
-                        type: 'daily',
-                        time: {
-                            hour: parseInt(match[1]),
-                            minute: parseInt(match[2]) || 0
-                        }
-                    })
-                },
-                {
-                    regex: /毎[週周]([月火水木金土日,、\s]+)[曜日]*\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
-                    parser: (match) => {
-                        const weekdayMap = {'月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6, '日': 0};
-                        const weekdayText = match[1];
-                        const weekdays = [];
-                        
-                        Object.keys(weekdayMap).forEach(day => {
-                            if (weekdayText.includes(day)) {
-                                weekdays.push(weekdayMap[day]);
-                            }
-                        });
-                        
-                        return {
-                            type: 'weekly',
-                            weekdays: weekdays,
-                            time: {
-                                hour: parseInt(match[2]),
-                                minute: parseInt(match[3]) || 0
-                            }
-                        };
-                    }
-                },
-                {
-                    regex: /毎月(\d{1,2})日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
-                    parser: (match) => ({
-                        type: 'monthly',
-                        monthDay: parseInt(match[1]),
-                        time: {
-                            hour: parseInt(match[2]),
-                            minute: parseInt(match[3]) || 0
-                        }
-                    })
-                },
-                {
-                    regex: /(\d+)日[ごと毎]\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
-                    parser: (match) => ({
-                        type: 'custom',
-                        interval: parseInt(match[1]),
-                        time: {
-                            hour: parseInt(match[2]),
-                            minute: parseInt(match[3]) || 0
-                        }
-                    })
-                }
-            ]
-        };
-
-        const langPatterns = patterns[language] || patterns.zh;
-        
-        for (const pattern of langPatterns) {
-            const match = text.match(pattern.regex);
-            if (match) {
-                try {
-                    const recurring = pattern.parser(match);
-                    return {
-                        type: 'recurring',
-                        recurring: recurring,
-                        original: match[0],
-                        confidence: 0.85
-                    };
-                } catch (error) {
-                    console.error('解析週期性提醒失敗:', error);
-                }
-            }
-        }
-        
-        return null;
-    }
-
-    /**
-     * 解析時間範圍
-     */
-    parseTimeRange(text, language = 'zh') {
-        const patterns = {
-            zh: [
-                {
-                    regex: /從\s*(\d{1,2})[點点时](\d{1,2})?分?\s*到\s*(\d{1,2})[點点时](\d{1,2})?分?/,
-                    parser: (match) => ({
-                        start: {
-                            hour: parseInt(match[1]),
-                            minute: parseInt(match[2]) || 0
-                        },
-                        end: {
-                            hour: parseInt(match[3]),
-                            minute: parseInt(match[4]) || 0
-                        }
-                    })
-                }
-            ],
-            ja: [
-                {
-                    regex: /(\d{1,2})[時时](\d{1,2})?分?から(\d{1,2})[時时](\d{1,2})?分?まで/,
-                    parser: (match) => ({
-                        start: {
-                            hour: parseInt(match[1]),
-                            minute: parseInt(match[2]) || 0
-                        },
-                        end: {
-                            hour: parseInt(match[3]),
-                            minute: parseInt(match[4]) || 0
-                        }
-                    })
-                }
-            ]
-        };
-
-        const langPatterns = patterns[language] || patterns.zh;
-        
-        for (const pattern of langPatterns) {
-            const match = text.match(pattern.regex);
-            if (match) {
-                try {
-                    return pattern.parser(match);
-                } catch (error) {
-                    console.error('解析時間範圍失敗:', error);
-                }
-            }
-        }
-        
-        return null;
-    }
-
-    /**
-     * 標準化時間格式
-     */
-    normalizeTime(hour, minute = 0) {
-        // 處理12小時制轉換
-        if (hour <= 12) {
-            // 如果是上午時間，可能需要額外判斷
-            // 這裡簡化處理，實際可以根據上下文判斷
-        }
-        
-        return {
-            hour: Math.max(0, Math.min(23, hour)),
-            minute: Math.max(0, Math.min(59, minute))
-        };
-    }
-
-    /**
-     * 獲取下一個指定週期的日期
-     */
-    getNextOccurrence(baseDate, recurring) {
-        const result = new Date(baseDate);
-        
-        switch (recurring.type) {
-            case 'daily':
-                result.setDate(result.getDate() + 1);
-                result.setHours(recurring.time.hour, recurring.time.minute, 0, 0);
-                break;
-                
-            case 'weekly':
-                const currentWeekday = result.getDay();
-                let nextWeekday = recurring.weekdays.find(day => day > currentWeekday);
-                
-                if (!nextWeekday) {
-                    // 如果本週沒有下個週期日，找下週的第一個
-                    nextWeekday = Math.min(...recurring.weekdays);
-                    const daysToAdd = (7 - currentWeekday) + nextWeekday;
-                    result.setDate(result.getDate() + daysToAdd);
-                } else {
-                    result.setDate(result.getDate() + (nextWeekday - currentWeekday));
-                }
-                
-                result.setHours(recurring.time.hour, recurring.time.minute, 0, 0);
-                break;
-                
-            case 'monthly':
-                if (result.getDate() < recurring.monthDay) {
-                    result.setDate(recurring.monthDay);
-                } else {
-                    result.setMonth(result.getMonth() + 1);
-                    result.setDate(recurring.monthDay);
-                }
-                result.setHours(recurring.time.hour, recurring.time.minute, 0, 0);
-                break;
-                
-            case 'custom':
-                result.setDate(result.getDate() + recurring.interval);
-                result.setHours(recurring.time.hour, recurring.time.minute, 0, 0);
-                break;
-        }
-        
-        return result;
-    }
-
-    /**
-     * 解析模糊時間表達
-     */
-    parseFuzzyTime(text, language = 'zh') {
-        const fuzzyPatterns = {
+        this.timePatterns = {
             zh: {
-                '早上': {hour: 8, minute: 0},
-                '上午': {hour: 9, minute: 0},
-                '中午': {hour: 12, minute: 0},
-                '下午': {hour: 14, minute: 0},
-                '傍晚': {hour: 18, minute: 0},
-                '晚上': {hour: 20, minute: 0},
-                '深夜': {hour: 23, minute: 0}
+                // 絕對時間
+                absolute: [
+                    /(\d{4})[年\-\/](\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2}):(\d{1,2})/,
+                    /(明天|明日)\s*(\d{1,2}):(\d{1,2})/,
+                    /(後天)\s*(\d{1,2}):(\d{1,2})/
+                ],
+                
+                // 相對時間
+                relative: [
+                    /(今天|今日)/,
+                    /(明天|明日)/,
+                    /(後天)/,
+                    /(\d+)\s*天後/,
+                    /(\d+)\s*小時後/,
+                    /(\d+)\s*分鐘後/,
+                    /(下週|下星期)/,
+                    /(下個月|下月)/
+                ],
+                
+                // 重複時間
+                recurring: [
+                    /每天\s*(\d{1,2}):(\d{1,2})/,
+                    /每週([一二三四五六日天])\s*(\d{1,2}):(\d{1,2})/,
+                    /每月(\d{1,2})號\s*(\d{1,2}):(\d{1,2})/,
+                    /每(\d+)天/,
+                    /每(\d+)週/,
+                    /每(\d+)個月/
+                ]
             },
+            
             ja: {
-                '朝': {hour: 8, minute: 0},
-                '午前': {hour: 9, minute: 0},
-                '昼': {hour: 12, minute: 0},
-                '午後': {hour: 14, minute: 0},
-                '夕方': {hour: 18, minute: 0},
-                '夜': {hour: 20, minute: 0},
-                '深夜': {hour: 23, minute: 0}
+                // 絕対時間
+                absolute: [
+                    /(\d{4})[年\-\/](\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2}):(\d{1,2})/,
+                    /(明日|あした)\s*(\d{1,2}):(\d{1,2})/,
+                    /(あさって|明後日)\s*(\d{1,2}):(\d{1,2})/
+                ],
+                
+                // 相対時間
+                relative: [
+                    /(今日|きょう)/,
+                    /(明日|あした)/,
+                    /(明後日|あさって)/,
+                    /(\d+)\s*日後/,
+                    /(\d+)\s*時間後/,
+                    /(\d+)\s*分後/,
+                    /(来週|らいしゅう)/,
+                    /(来月|らいげつ)/
+                ],
+                
+                // 繰り返し時間
+                recurring: [
+                    /毎日\s*(\d{1,2}):(\d{1,2})/,
+                    /毎週([月火水木金土日])\s*(\d{1,2}):(\d{1,2})/,
+                    /毎月(\d{1,2})日\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d+)日ごと/,
+                    /(\d+)週間ごと/,
+                    /(\d+)ヶ月ごと/
+                ]
             }
         };
-
-        const patterns = fuzzyPatterns[language] || fuzzyPatterns.zh;
-        
-        for (const [keyword, time] of Object.entries(patterns)) {
-            if (text.includes(keyword)) {
-                return time;
+    }
+    
+    // 解析時間字串
+    parseDateTime(text, language = 'zh') {
+        try {
+            const lang = language || 'zh';
+            const patterns = this.timePatterns[lang];
+            
+            if (!patterns) {
+                console.warn(`不支援的語言: ${lang}`);
+                return null;
             }
+            
+            // 嘗試解析絕對時間
+            let result = this.parseAbsoluteTime(text, patterns.absolute);
+            if (result) return result;
+            
+            // 嘗試解析相對時間
+            result = this.parseRelativeTime(text, patterns.relative);
+            if (result) return result;
+            
+            // 嘗試解析重複時間
+            result = this.parseRecurringTime(text, patterns.recurring);
+            if (result) return result;
+            
+            return null;
+            
+        } catch (error) {
+            console.error('解析時間時發生錯誤:', error);
+            return null;
+        }
+    }
+    
+    // 解析絕對時間
+    parseAbsoluteTime(text, patterns) {
+        for (const pattern of patterns) {
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    return this.extractAbsoluteDateTime(match);
+                }
+            } catch (error) {
+                console.warn('絕對時間解析錯誤:', error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 解析相對時間
+    parseRelativeTime(text, patterns) {
+        for (const pattern of patterns) {
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    return this.extractRelativeDateTime(match, text);
+                }
+            } catch (error) {
+                console.warn('相對時間解析錯誤:', error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 解析重複時間
+    parseRecurringTime(text, patterns) {
+        for (const pattern of patterns) {
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    return this.extractRecurringDateTime(match, text);
+                }
+            } catch (error) {
+                console.warn('重複時間解析錯誤:', error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 提取絕對時間
+    extractAbsoluteDateTime(match) {
+        const now = new Date();
+        let year = now.getFullYear();
+        let month = now.getMonth() + 1;
+        let day = now.getDate();
+        let hour = 0;
+        let minute = 0;
+        
+        // 根據匹配結果解析
+        if (match.length >= 6) {
+            // 完整日期時間格式
+            year = parseInt(match[1]);
+            month = parseInt(match[2]);
+            day = parseInt(match[3]);
+            hour = parseInt(match[4]);
+            minute = parseInt(match[5]);
+        } else if (match.length >= 5) {
+            // 月日時間格式
+            month = parseInt(match[1]);
+            day = parseInt(match[2]);
+            hour = parseInt(match[3]);
+            minute = parseInt(match[4]);
+        } else if (match.length >= 3) {
+            // 只有時間格式
+            hour = parseInt(match[1]);
+            minute = parseInt(match[2]);
+        }
+        
+        const targetDate = new Date(year, month - 1, day, hour, minute);
+        
+        return {
+            type: 'absolute',
+            date: targetDate,
+            dateString: targetDate.toISOString(),
+            isValid: targetDate > now
+        };
+    }
+    
+    // 提取相對時間
+    extractRelativeDateTime(match, text) {
+        const now = new Date();
+        let targetDate = new Date(now);
+        
+        const timeMatch = text.match(/(\d{1,2}):(\d{1,2})/);
+        let hour = timeMatch ? parseInt(timeMatch[1]) : now.getHours();
+        let minute = timeMatch ? parseInt(timeMatch[2]) : now.getMinutes();
+        
+        if (match[1] === '今天' || match[1] === '今日') {
+            // 今天
+            targetDate.setHours(hour, minute, 0, 0);
+        } else if (match[1] === '明天' || match[1] === '明日') {
+            // 明天
+            targetDate.setDate(targetDate.getDate() + 1);
+            targetDate.setHours(hour, minute, 0, 0);
+        } else if (match[1] === '後天') {
+            // 後天
+            targetDate.setDate(targetDate.getDate() + 2);
+            targetDate.setHours(hour, minute, 0, 0);
+        } else if (match[1] && match[1].includes('天後')) {
+            // N天後
+            const days = parseInt(match[1]);
+            targetDate.setDate(targetDate.getDate() + days);
+            targetDate.setHours(hour, minute, 0, 0);
+        }
+        
+        return {
+            type: 'relative',
+            date: targetDate,
+            dateString: targetDate.toISOString(),
+            isValid: targetDate > now
+        };
+    }
+    
+    // 提取重複時間
+    extractRecurringDateTime(match, text) {
+        const now = new Date();
+        
+        if (match[0].includes('每天')) {
+            return {
+                type: 'daily',
+                time: `${match[1]}:${match[2]}`,
+                hour: parseInt(match[1]),
+                minute: parseInt(match[2]),
+                isValid: true
+            };
+        } else if (match[0].includes('每週')) {
+            return {
+                type: 'weekly',
+                weekday: match[1],
+                time: `${match[2]}:${match[3]}`,
+                hour: parseInt(match[2]),
+                minute: parseInt(match[3]),
+                isValid: true
+            };
+        } else if (match[0].includes('每月')) {
+            return {
+                type: 'monthly',
+                day: parseInt(match[1]),
+                time: `${match[2]}:${match[3]}`,
+                hour: parseInt(match[2]),
+                minute: parseInt(match[3]),
+                isValid: true
+            };
         }
         
         return null;
     }
-
-    /**
-     * 格式化解析結果
-     */
-    formatResult(parseResult) {
-        if (!parseResult) return null;
-        
-        return {
-            ...parseResult,
-            formatted: this.formatDateTime(parseResult.dateTime),
-            isValid: this.isValidDateTime(parseResult.dateTime),
-            timeFromNow: this.getTimeFromNow(parseResult.dateTime)
-        };
-    }
-
-    /**
-     * 格式化日期時間顯示
-     */
-    formatDateTime(dateTime, language = 'zh') {
-        if (!dateTime) return '';
+    
+    // 格式化時間顯示
+    formatDateTime(date, language = 'zh') {
+        if (!date) return '';
         
         const options = {
             year: 'numeric',
-            month: 'short',
-            day: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
             hour: '2-digit',
             minute: '2-digit',
-            weekday: 'short'
+            hour12: false
         };
-
+        
         const locale = language === 'ja' ? 'ja-JP' : 'zh-TW';
-        return dateTime.toLocaleDateString(locale, options);
+        return date.toLocaleDateString(locale, options);
     }
-
-    /**
-     * 計算距離現在的時間
-     */
-    getTimeFromNow(dateTime) {
-        if (!dateTime) return '';
+    
+    // 檢查時間是否有效
+    isValidDateTime(dateTime) {
+        if (!dateTime) return false;
         
         const now = new Date();
-        const diffMs = dateTime.getTime() - now.getTime();
-        const diffMins = Math.round(diffMs / (1000 * 60));
-        const diffHours = Math.round(diffMs / (1000 * 60 * 60));
-        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+        const targetDate = new Date(dateTime);
         
-        if (diffMins < 60) {
-            return `${diffMins}分鐘後`;
-        } else if (diffHours < 24) {
-            return `${diffHours}小時後`;
-        } else {
-            return `${diffDays}天後`;
-        }
-    }
-
-    /**
-     * 批量解析（用於處理多個時間表達）
-     */
-    parseMultiple(texts, language = 'zh') {
-        return texts.map(text => this.parse(text, language)).filter(result => result !== null);
+        return targetDate instanceof Date && !isNaN(targetDate) && targetDate > now;
     }
 }
 
-module.exports = new DateTimeParser();主要解析函數
-     */
-    parse(text, language = 'zh') {
-        const cleanText = text.toLowerCase().trim();
-        
-        // 嘗試各種解析模式
-        let result = null;
-        
-        // 1. 絕對日期時間
-        result = this.parseAbsoluteDateTime(cleanText, language);
-        if (result) return result;
-        
-        // 2. 相對時間
-        result = this.parseRelativeDateTime(cleanText, language);
-        if (result) return result;
-        
-        // 3. 週期性時間
-        result = this.parseRecurringDateTime(cleanText, language);
-        if (result) return result;
-        
-        // 4. 自然語言時間
-        result = this.parseNaturalLanguage(cleanText, language);
-        if (result) return result;
-        
-        return null;
-    }
-
-    /**
-     * 解析絕對日期時間
-     */
-    parseAbsoluteDateTime(text, language) {
-        const patterns = this.patterns[language]?.absolute || this.patterns.zh.absolute;
-        
-        for (const pattern of patterns) {
-            const match = text.match(pattern.regex);
-            if (match) {
-                try {
-                    const dateTime = pattern.parser(match);
-                    if (this.isValidDateTime(dateTime)) {
-                        return {
-                            type: 'absolute',
-                            dateTime: dateTime,
-                            original: match[0],
-                            confidence: 0.9
-                        };
-                    }
-                } catch (error) {
-                    console.error('解析絕對時間失敗:', error);
-                }
-            }
-        }
-        
-        return null;
-    }
-
-    /**
-     * 解析相對時間
-     */
-    parseRelativeDateTime(text, language) {
-        const patterns = this.patterns[language]?.relative || this.patterns.zh.relative;
-        
-        for (const pattern of patterns) {
-            const match = text.match(pattern.regex);
-            if (match) {
-                try {
-                    const baseTime = new Date();
-                    const dateTime = pattern.parser(match, baseTime);
-                    if (this.isValidDateTime(dateTime)) {
-                        return {
-                            type: 'relative',
-                            dateTime: dateTime,
-                            original: match[0],
-                            confidence: 0.8
-                        };
-                    }
-                } catch (error) {
-                    console.error('解析相對時間失敗:', error);
-                }
-            }
-        }
-        
-        return null;
-    }
-
-    /**
-     * 解析週期性時間
-     */
-    parseRecurringDateTime(text, language) {
-        const patterns = this.patterns[language]?.recurring || this.patterns.zh.recurring;
-        
-        for (const pattern of patterns) {
-            const match = text.match(pattern.regex);
-            if (match) {
-                try {
-                    const recurring = pattern.parser(match);
-                    return {
-                        type: 'recurring',
-                        recurring: recurring,
-                        original: match[0],
-                        confidence: 0.85
-                    };
-                } catch (error) {
-                    console.error('解析週期時間失敗:', error);
-                }
-            }
-        }
-        
-        return null;
-    }
-
-    /**
-     * 自然語言解析
-     */
-    parseNaturalLanguage(text, language) {
-        const now = new Date();
-        let result = null;
-
-        // 中文自然語言
-        if (language === 'zh') {
-            result = this.parseChineseNaturalLanguage(text, now);
-        }
-        
-        // 日文自然語言
-        if (language === 'ja') {
-            result = this.parseJapaneseNaturalLanguage(text, now);
-        }
-
-        return result;
-    }
-
-    /**
-     * 中文自然語言解析
-     */
-    parseChineseNaturalLanguage(text, baseTime) {
-        const patterns = [
-            // 今天
-            {
-                regex: /今天\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const hour = parseInt(match[1]);
-                    const minute = parseInt(match[2]) || 0;
-                    const result = new Date(baseTime);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // 明天
-            {
-                regex: /明天\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const hour = parseInt(match[1]);
-                    const minute = parseInt(match[2]) || 0;
-                    const result = new Date(baseTime);
-                    result.setDate(result.getDate() + 1);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // 後天
-            {
-                regex: /後天\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const hour = parseInt(match[1]);
-                    const minute = parseInt(match[2]) || 0;
-                    const result = new Date(baseTime);
-                    result.setDate(result.getDate() + 2);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // 下週
-            {
-                regex: /下[週周星期]([一二三四五六日天])\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const weekdayMap = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0};
-                    const targetWeekday = weekdayMap[match[1]];
-                    const hour = parseInt(match[2]);
-                    const minute = parseInt(match[3]) || 0;
-                    
-                    const result = new Date(baseTime);
-                    const currentWeekday = result.getDay();
-                    let daysToAdd = targetWeekday - currentWeekday + 7;
-                    
-                    result.setDate(result.getDate() + daysToAdd);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // 下個月
-            {
-                regex: /下[個个]月(\d{1,2})[號号日]\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const day = parseInt(match[1]);
-                    const hour = parseInt(match[2]);
-                    const minute = parseInt(match[3]) || 0;
-                    
-                    const result = new Date(baseTime);
-                    result.setMonth(result.getMonth() + 1);
-                    result.setDate(day);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // X小時後
-            {
-                regex: /(\d+)\s*[個个]?小[時时]後/,
-                parser: (match) => {
-                    const hours = parseInt(match[1]);
-                    const result = new Date(baseTime);
-                    result.setHours(result.getHours() + hours);
-                    return result;
-                }
-            },
-            // X分鐘後
-            {
-                regex: /(\d+)\s*分[鐘钟]後/,
-                parser: (match) => {
-                    const minutes = parseInt(match[1]);
-                    const result = new Date(baseTime);
-                    result.setMinutes(result.getMinutes() + minutes);
-                    return result;
-                }
-            }
-        ];
-
-        for (const pattern of patterns) {
-            const match = text.match(pattern.regex);
-            if (match) {
-                try {
-                    const dateTime = pattern.parser(match);
-                    if (this.isValidDateTime(dateTime)) {
-                        return {
-                            type: 'natural',
-                            dateTime: dateTime,
-                            original: match[0],
-                            confidence: 0.7
-                        };
-                    }
-                } catch (error) {
-                    console.error('中文自然語言解析失敗:', error);
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * 日文自然語言解析
-     */
-    parseJapaneseNaturalLanguage(text, baseTime) {
-        const patterns = [
-            // 今日
-            {
-                regex: /今日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const hour = parseInt(match[1]);
-                    const minute = parseInt(match[2]) || 0;
-                    const result = new Date(baseTime);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // 明日
-            {
-                regex: /明日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const hour = parseInt(match[1]);
-                    const minute = parseInt(match[2]) || 0;
-                    const result = new Date(baseTime);
-                    result.setDate(result.getDate() + 1);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // 来週
-            {
-                regex: /来[週周]([月火水木金土日])[曜日]*\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const weekdayMap = {'月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6, '日': 0};
-                    const targetWeekday = weekdayMap[match[1]];
-                    const hour = parseInt(match[2]);
-                    const minute = parseInt(match[3]) || 0;
-                    
-                    const result = new Date(baseTime);
-                    const currentWeekday = result.getDay();
-                    let daysToAdd = targetWeekday - currentWeekday + 7;
-                    
-                    result.setDate(result.getDate() + daysToAdd);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // 来月
-            {
-                regex: /来月(\d{1,2})日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
-                parser: (match) => {
-                    const day = parseInt(match[1]);
-                    const hour = parseInt(match[2]);
-                    const minute = parseInt(match[3]) || 0;
-                    
-                    const result = new Date(baseTime);
-                    result.setMonth(result.getMonth() + 1);
-                    result.setDate(day);
-                    result.setHours(hour, minute, 0, 0);
-                    return result;
-                }
-            },
-            // X時間後
-            {
-                regex: /(\d+)[時间]間後/,
-                parser: (match) => {
-                    const hours = parseInt(match[1]);
-                    const result = new Date(baseTime);
-                    result.setHours(result.getHours() + hours);
-                    return result;
-                }
-            }
-        ];
-
-        for (const pattern of patterns) {
-            const match = text.match(pattern.regex);
-            if (match) {
-                try {
-                    const dateTime = pattern.parser(match);
-                    if (this.isValidDateTime(dateTime)) {
-                        return {
-                            type: 'natural',
-                            dateTime: dateTime,
-                            original: match[0],
-                            confidence: 0.7
-                        };
-                    }
-                } catch (error) {
-                    console.error('日文自然語言解析失敗:', error);
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     *
+module.exports = new DateTimeParser();
