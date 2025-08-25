@@ -1,438 +1,268 @@
-const dateTimeParser = require('../parsers/dateTimeParser');
-const { detectLanguage } = require('../parsers/languageParser');
-const { COMMAND_PATTERNS, PRIORITY_KEYWORDS, LOCATION_PATTERNS } = require('../constants/dateTimeConstants');
+// utils/commandParser.js - 統一指令解析器
+const NaturalLanguageProcessor = require('./naturalLanguageProcessor');
 
-class CommandParser {
-    constructor() {
-        this.patterns = COMMAND_PATTERNS;
-    }
+// 創建自然語言處理器實例
+const nlp = new NaturalLanguageProcessor();
 
-    /**
-     * 主要解析函數
-     */
-    parseCommand(text) {
-        const language = detectLanguage(text);
-        const cleanText = text.trim();
+// === 雙語指令支援 ===
+const EXPENSE_COMMAND_MAPPING = {
+  // 中文指令
+  '總結': 'summary',
+  '本月總結': 'summary',
+  '說明': 'help',
+  '幫助': 'help',
+  '設定預算': 'set_budget',
+  '預算': 'budget',
+  '查看預算': 'budget',
+  '剩餘': 'remaining',
+  
+  // 日文指令
+  '集計': 'summary',
+  '合計': 'summary', 
+  'まとめ': 'summary',
+  '今月集計': 'summary',
+  '説明': 'help',
+  'ヘルプ': 'help',
+  '助け': 'help',
+  '予算設定': 'set_budget',
+  '予算': 'budget',
+  '残り': 'remaining',
+  '残額': 'remaining'
+};
 
-        // 檢查是否為記帳指令（優先檢查，保持現有功能）
-        const accountingResult = this.parseAccountingCommand(cleanText, language);
-        if (accountingResult) {
-            return accountingResult;
-        }
+const TODO_COMMAND_MAPPING = {
+  // 中文代辦指令
+  '新增代辦': 'add_todo',
+  '添加代辦': 'add_todo',
+  '代辦列表': 'list_todos',
+  '查看代辦': 'list_todos',
+  '完成代辦': 'complete_todo',
+  '刪除代辦': 'delete_todo',
+  '新增提醒': 'add_reminder',
+  '添加提醒': 'add_reminder',
+  '提醒列表': 'list_reminders',
+  '查看提醒': 'list_reminders',
+  '刪除提醒': 'delete_reminder',
+  '代辦說明': 'todo_help',
+  '代辦幫助': 'todo_help',
+  
+  // 日文代辦指令
+  'タスク追加': 'add_todo',
+  'TODO追加': 'add_todo',
+  'タスク一覧': 'list_todos',
+  'TODO一覧': 'list_todos',
+  'タスク完了': 'complete_todo',
+  'TODO完了': 'complete_todo',
+  'タスク削除': 'delete_todo',
+  'TODO削除': 'delete_todo',
+  'リマインダー追加': 'add_reminder',
+  'リマインダー一覧': 'list_reminders',
+  'リマインダー削除': 'delete_reminder',
+  'TODO説明': 'todo_help',
+  'TODOヘルプ': 'todo_help'
+};
 
-        // 檢查是否為代辦/提醒指令
-        const todoResult = this.parseTodoCommand(cleanText, language);
-        if (todoResult) {
-            return todoResult;
-        }
-
-        // 檢查是否為系統指令
-        const systemResult = this.parseSystemCommand(cleanText, language);
-        if (systemResult) {
-            return systemResult;
-        }
-
-        return null;
-    }
-
-    /**
-     * 解析記帳指令（保持現有邏輯）
-     */
-    parseAccountingCommand(text, language) {
-        // 這裡保持你現有的記帳解析邏輯
-        // 檢查是否包含金額、類別等記帳相關關鍵字
-        const amountPattern = /[￥$€£¥]?\s*\d+(\.\d{1,2})?/;
-        const categoryKeywords = {
-            zh: ['早餐', '午餐', '晚餐', '交通', '購物', '娛樂', '醫療', '房租', '水電'],
-            ja: ['朝食', '昼食', '夕食', '交通', '買い物', '娯楽', '医療', '家賃', '光熱費']
-        };
-
-        if (amountPattern.test(text)) {
-            const keywords = categoryKeywords[language] || categoryKeywords.zh;
-            const hasCategory = keywords.some(keyword => text.includes(keyword));
-            
-            if (hasCategory) {
-                return {
-                    type: 'accounting',
-                    confidence: 0.9,
-                    language: language,
-                    originalText: text
-                };
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * 解析代辦/提醒指令
-     */
-    parseTodoCommand(text, language) {
-        const patterns = this.patterns[language] || this.patterns.zh;
-        
-        // 檢查動作類型
-        let action = null;
-        let confidence = 0;
-
-        for (const [actionType, pattern] of Object.entries(patterns)) {
-            if (pattern.test(text)) {
-                action = actionType;
-                confidence = 0.8;
-                break;
-            }
-        }
-
-        // 如果沒有明確動作，但包含提醒相關關鍵字，則判斷為新增
-        if (!action) {
-            const reminderKeywords = {
-                zh: ['提醒', '代辦', '任務', '要做', '記得', '別忘了'],
-                ja: ['リマインド', 'タスク', '予定', 'やること', '忘れずに', '覚えている']
-            };
-
-            const keywords = reminderKeywords[language] || reminderKeywords.zh;
-            if (keywords.some(keyword => text.includes(keyword))) {
-                action = 'add';
-                confidence = 0.6;
-            }
-        }
-
-        if (!action) return null;
-
-        // 解析具體內容
-        const parsedContent = this.parseContentDetails(text, language);
-        
-        return {
-            type: 'todo',
-            action: action,
-            confidence: confidence,
-            language: language,
-            originalText: text,
-            ...parsedContent
-        };
-    }
-
-    /**
-     * 解析內容詳情
-     */
-    parseContentDetails(text, language) {
-        const result = {
-            title: null,
-            description: null,
-            datetime: null,
-            recurring: null,
-            priority: null,
-            location: null,
-            tags: []
-        };
-
-        // 解析時間
-        const datetimeResult = dateTimeParser.parse(text, language);
-        if (datetimeResult) {
-            if (datetimeResult.type === 'recurring') {
-                result.recurring = datetimeResult.recurring;
-            } else {
-                result.datetime = datetimeResult.dateTime;
-            }
-        }
-
-        // 解析優先級
-        result.priority = this.parsePriority(text, language);
-
-        // 解析地點
-        result.location = this.parseLocation(text, language);
-
-        // 解析標題和描述
-        const titleDesc = this.extractTitleAndDescription(text, language);
-        result.title = titleDesc.title;
-        result.description = titleDesc.description;
-
-        // 解析標籤
-        result.tags = this.extractTags(text, language);
-
-        return result;
-    }
-
-    /**
-     * 解析優先級
-     */
-    parsePriority(text, language) {
-        const keywords = PRIORITY_KEYWORDS[language] || PRIORITY_KEYWORDS.zh;
-        
-        for (const [level, words] of Object.entries(keywords)) {
-            if (words.some(word => text.includes(word))) {
-                return level;
-            }
-        }
-        
-        return 'medium'; // 預設中等優先級
-    }
-
-    /**
-     * 解析地點
-     */
-    parseLocation(text, language) {
-        const patterns = LOCATION_PATTERNS[language] || LOCATION_PATTERNS.zh;
-        
-        for (const [type, pattern] of Object.entries(patterns)) {
-            const match = text.match(pattern);
-            if (match) {
-                return match[1].trim();
-            }
-        }
-        
-        return null;
-    }
-
-    /**
-     * 提取標題和描述
-     */
-    extractTitleAndDescription(text, language) {
-        // 移除時間、地點、優先級等已解析的部分
-        let cleanText = text;
-        
-        // 移除時間表達
-        const timePatterns = {
-            zh: [
-                /\d{1,2}[點点时]\d{0,2}分?/g,
-                /明天|後天|下[週周]/g,
-                /每[天日週周月]/g
-            ],
-            ja: [
-                /\d{1,2}[時时]\d{0,2}分?/g,
-                /明日|来[週周月]/g,
-                /毎[日週月]/g
-            ]
-        };
-
-        const patterns = timePatterns[language] || timePatterns.zh;
-        patterns.forEach(pattern => {
-            cleanText = cleanText.replace(pattern, ' ');
-        });
-
-        // 移除動作詞
-        const actionWords = {
-            zh: ['提醒', '代辦', '新增', '創建', '要做', '記得', '別忘了'],
-            ja: ['リマインド', 'タスク', '追加', '作成', 'やること', '忘れずに']
-        };
-
-        const actions = actionWords[language] || actionWords.zh;
-        actions.forEach(word => {
-            cleanText = cleanText.replace(new RegExp(word, 'g'), ' ');
-        });
-
-        // 清理多餘空白
-        cleanText = cleanText.replace(/\s+/g, ' ').trim();
-
-        // 簡單的標題描述分離（以第一個句號或換行為界）
-        const sentences = cleanText.split(/[。．\n]/);
-        const title = sentences[0]?.trim() || cleanText;
-        const description = sentences.slice(1).join(' ').trim() || null;
-
-        return {
-            title: title || text, // 如果無法提取，使用原文
-            description: description
-        };
-    }
-
-    /**
-     * 提取標籤
-     */
-    extractTags(text, language) {
-        const tagPatterns = {
-            zh: /#(\w+)/g,
-            ja: /#(\w+)/g
-        };
-
-        const pattern = tagPatterns[language] || tagPatterns.zh;
-        const matches = text.matchAll(pattern);
-        const tags = [];
-
-        for (const match of matches) {
-            tags.push(match[1]);
-        }
-
-        return tags;
-    }
-
-    /**
-     * 解析系統指令
-     */
-    parseSystemCommand(text, language) {
-        const systemCommands = {
-            zh: {
-                help: ['幫助', '說明', '指令', '怎麼用'],
-                settings: ['設定', '設置', '配置'],
-                status: ['狀態', '統計', '報告'],
-                export: ['匯出', '導出', '備份'],
-                import: ['匯入', '導入', '恢復']
-            },
-            ja: {
-                help: ['ヘルプ', '説明', 'コマンド', '使い方'],
-                settings: ['設定', '設置', '構成'],
-                status: ['ステータス', '統計', 'レポート'],
-                export: ['エクスポート', 'バックアップ'],
-                import: ['インポート', '復元']
-            }
-        };
-
-        const commands = systemCommands[language] || systemCommands.zh;
-        
-        for (const [command, keywords] of Object.entries(commands)) {
-            if (keywords.some(keyword => text.includes(keyword))) {
-                return {
-                    type: 'system',
-                    action: command,
-                    confidence: 0.9,
-                    language: language,
-                    originalText: text
-                };
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * 解析查詢指令的詳細參數
-     */
-    parseQueryParameters(text, language) {
-        const params = {
-            status: null,
-            dateRange: null,
-            priority: null,
-            keyword: null,
-            limit: null
-        };
-
-        // 解析狀態篩選
-        const statusKeywords = {
-            zh: {
-                pending: ['待做', '未完成', '進行中'],
-                completed: ['已完成', '完成了', '做完了'],
-                overdue: ['逾期', '過期', '延誤']
-            },
-            ja: {
-                pending: ['未完了', '進行中', 'やること'],
-                completed: ['完了', '終了', '済み'],
-                overdue: ['期限切れ', '遅延']
-            }
-        };
-
-        const statuses = statusKeywords[language] || statusKeywords.zh;
-        for (const [status, keywords] of Object.entries(statuses)) {
-            if (keywords.some(keyword => text.includes(keyword))) {
-                params.status = status;
-                break;
-            }
-        }
-
-        // 解析日期範圍
-        const dateRangeKeywords = {
-            zh: ['今天', '明天', '本週', '下週', '本月', '下月'],
-            ja: ['今日', '明日', '今週', '来週', '今月', '来月']
-        };
-
-        const ranges = dateRangeKeywords[language] || dateRangeKeywords.zh;
-        for (const range of ranges) {
-            if (text.includes(range)) {
-                params.dateRange = range;
-                break;
-            }
-        }
-
-        // 解析數量限制
-        const limitMatch = text.match(/(\d+)[個项]?/);
-        if (limitMatch) {
-            params.limit = parseInt(limitMatch[1]);
-        }
-
-        // 提取關鍵字（移除其他已解析的部分）
-        let keyword = text;
-        Object.values(params).forEach(value => {
-            if (value && typeof value === 'string') {
-                keyword = keyword.replace(new RegExp(value, 'g'), '');
-            }
-        });
-        
-        // 清理關鍵字
-        keyword = keyword.replace(/[查看列出顯示搜尋搜索]/g, '').trim();
-        if (keyword && keyword.length > 0) {
-            params.keyword = keyword;
-        }
-
-        return params;
-    }
-
-    /**
-     * 驗證解析結果
-     */
-    validateParseResult(result) {
-        if (!result) return false;
-
-        // 檢查必要欄位
-        if (!result.type || !result.language) {
-            return false;
-        }
-
-        // 檢查信心度
-        if (result.confidence < 0.3) {
-            return false;
-        }
-
-        // 針對不同類型進行特定驗證
-        switch (result.type) {
-            case 'todo':
-                return this.validateTodoResult(result);
-            case 'accounting':
-                return this.validateAccountingResult(result);
-            case 'system':
-                return this.validateSystemResult(result);
-            default:
-                return true;
-        }
-    }
-
-    validateTodoResult(result) {
-        if (!result.action) return false;
-        
-        if (result.action === 'add') {
-            return result.title && result.title.length > 0;
-        }
-        
-        return true;
-    }
-
-    validateAccountingResult(result) {
-        // 保持現有的記帳驗證邏輯
-        return true;
-    }
-
-    validateSystemResult(result) {
-        return result.action && typeof result.action === 'string';
-    }
-
-    /**
-     * 獲取解析信心度
-     */
-    getConfidenceScore(text, result) {
-        if (!result) return 0;
-
-        let score = result.confidence || 0;
-
-        // 根據解析到的元素數量增加信心度
-        const elements = [
-            result.datetime,
-            result.recurring,
-            result.priority,
-            result.location,
-            result.title
-        ].filter(Boolean);
-
-        score += elements.length * 0.1;
-
-        // 確保不超過1.0
-        return Math.min(1.0, score);
-    }
+// 語言檢測函數
+function detectLanguage(message) {
+  const japaneseKeywords = ['集計', '合計', 'まとめ', '今月集計', '説明', 'ヘルプ', '助け',
+                           '昼食', 'ランチ', '夕食', '夜食', '朝食', 'コーヒー', '珈琲',
+                           '交通費', '電車', 'バス', 'タクシー', '買い物', 'ショッピング',
+                           '娯楽', '映画', 'ゲーム', '医療', '病院', '薬', '今日', '昨日', '一昨日',
+                           '予算設定', '予算', '残り', '残額', 'タスク', 'TODO', 'リマインダー'];
+  
+  // 檢查日文平假名、片假名字符
+  const japaneseChars = /[\u3040-\u309F\u30A0-\u30FF]/;
+  
+  const hasJapaneseKeyword = japaneseKeywords.some(keyword => message.includes(keyword));
+  const hasJapaneseChars = japaneseChars.test(message);
+  
+  return (hasJapaneseKeyword || hasJapaneseChars) ? 'ja' : 'zh';
 }
 
-module.exports = new CommandParser();
+// 檢查是否為預算設定格式
+function isBudgetSetting(text) {
+  const patterns = [
+    /^設定預算[\s　]+(\d+)/,
+    /^預算設定[\s　]+(\d+)/,
+    /^予算設定[\s　]+(\d+)/,
+    /^予算[\s　]+(\d+)/,
+    /^預算[\s　]+(\d+)/
+  ];
+  
+  return patterns.some(pattern => pattern.test(text.trim()));
+}
+
+// 檢查是否為代辦相關指令
+function isTodoCommand(message) {
+  // 檢查直接的代辦指令
+  const todoKeywords = [
+    // 中文
+    '代辦', '待辦', '提醒', 'todo', 'TODO',
+    // 日文
+    'タスク', 'TODO', 'リマインダー'
+  ];
+  
+  return todoKeywords.some(keyword => 
+    message.toLowerCase().includes(keyword.toLowerCase())
+  );
+}
+
+// 統一指令解析函數
+function parseCommand(message) {
+  const language = detectLanguage(message);
+  const trimmedMessage = message.trim();
+  
+  // 首先檢查是否為記帳相關的直接指令
+  const expenseCommandType = EXPENSE_COMMAND_MAPPING[trimmedMessage];
+  if (expenseCommandType) {
+    return {
+      success: true,
+      category: 'expense',
+      commandType: expenseCommandType,
+      language,
+      originalMessage: message
+    };
+  }
+  
+  // 檢查是否為代辦相關的直接指令
+  const todoCommandType = TODO_COMMAND_MAPPING[trimmedMessage];
+  if (todoCommandType) {
+    return {
+      success: true,
+      category: 'todo',
+      commandType: todoCommandType,
+      language,
+      originalMessage: message
+    };
+  }
+  
+  // 檢查是否為設定預算格式
+  if (isBudgetSetting(trimmedMessage)) {
+    return {
+      success: true,
+      category: 'expense',
+      commandType: 'set_budget',
+      language,
+      originalMessage: message
+    };
+  }
+  
+  // 檢查是否包含代辦相關關鍵詞
+  if (isTodoCommand(trimmedMessage)) {
+    // 嘗試解析代辦相關的自然語言
+    const todoResult = parseTodoNaturalLanguage(trimmedMessage, language);
+    if (todoResult.success) {
+      return {
+        success: true,
+        category: 'todo',
+        commandType: todoResult.commandType,
+        language,
+        originalMessage: message,
+        parsedData: todoResult.data
+      };
+    }
+    
+    // 如果無法解析，返回代辦幫助
+    return {
+      success: true,
+      category: 'todo',
+      commandType: 'todo_help',
+      language,
+      originalMessage: message
+    };
+  }
+  
+  // 使用自然語言處理器解析記帳資料
+  const nlResult = nlp.parseNaturalLanguage(trimmedMessage, language);
+  if (nlResult.success) {
+    return {
+      success: true,
+      category: 'expense',
+      commandType: 'expense',
+      language,
+      originalMessage: message,
+      parsedData: nlResult
+    };
+  }
+  
+  // 無法識別的指令
+  return {
+    success: false,
+    language,
+    error: nlResult.error || (language === 'ja' ? 
+      '正しい形式を入力するか、「説明」または「TODOヘルプ」で使用方法を確認してください' : 
+      '請輸入正確格式或輸入「說明」或「代辦說明」查看使用方法')
+  };
+}
+
+// 解析代辦相關的自然語言
+function parseTodoNaturalLanguage(message, language) {
+  const lowerMessage = message.toLowerCase();
+  
+  // 新增代辦的模式
+  const addTodoPatterns = [
+    /(?:新增|添加|加入)(?:代辦|待辦|任務)[:：]?\s*(.+)/i,
+    /(?:タスク|TODO)(?:追加|新規)[:：]?\s*(.+)/i,
+    /(?:代辦|待辦|todo)[:：]\s*(.+)/i
+  ];
+  
+  // 提醒相關的模式
+  const reminderPatterns = [
+    /(?:提醒|リマインド).*?(\d+)(?:點|時|:)(\d+)?.*?(.+)/i,
+    /(\d+)(?:點|時|:)(\d+)?.*?(?:提醒|リマインド).*?(.+)/i,
+    /(?:明天|明日|今天|今日|後天).*?(?:提醒|リマインド)/i
+  ];
+  
+  // 檢查新增代辦
+  for (const pattern of addTodoPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      return {
+        success: true,
+        commandType: 'add_todo',
+        data: {
+          content: match[1].trim(),
+          priority: 'normal'
+        }
+      };
+    }
+  }
+  
+  // 檢查提醒
+  for (const pattern of reminderPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      return {
+        success: true,
+        commandType: 'add_reminder',
+        data: {
+          content: match[3] || match[1],
+          time: match[1] && match[2] ? `${match[1]}:${match[2]}` : null
+        }
+      };
+    }
+  }
+  
+  // 檢查完成或刪除
+  if (/(?:完成|刪除|删除|完了|削除)/.test(message)) {
+    const isComplete = /(?:完成|完了)/.test(message);
+    const numberMatch = message.match(/(\d+)/);
+    
+    return {
+      success: true,
+      commandType: isComplete ? 'complete_todo' : 'delete_todo',
+      data: {
+        id: numberMatch ? parseInt(numberMatch[1]) : null
+      }
+    };
+  }
+  
+  return { success: false };
+}
+
+module.exports = {
+  detectLanguage,
+  parseCommand,
+  isBudgetSetting,
+  isTodoCommand
+};
