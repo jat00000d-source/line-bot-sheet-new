@@ -1,283 +1,423 @@
-// parsers/languageParser.js
-// 智慧語言識別系統
-
 class LanguageParser {
-  constructor() {
-    // 中文字元範圍
-    this.chineseRegex = /[\u4e00-\u9fff]/;
-    // 日文字元範圍（平假名、片假名、漢字）
-    this.japaneseRegex = /[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]/;
-    // 平假名範圍
-    this.hiraganaRegex = /[\u3040-\u309f]/;
-    // 片假名範圍
-    this.katakanaRegex = /[\u30a0-\u30ff]/;
-    
-    // 中文特有詞彙
-    this.chineseKeywords = [
-      '點', '分', '號', '天', '週', '月', '年',
-      '上午', '下午', '晚上', '星期', '禮拜',
-      '明天', '後天', '昨天', '每天', '每週',
-      '提醒', '代辦', '待辦', '記帳', '帳務'
-    ];
-    
-    // 日文特有詞彙
-    this.japaneseKeywords = [
-      '時', '分', '日', '曜日', '毎日', '毎週',
-      '午前', '午後', '今日', '明日', 'あした',
-      'きょう', 'らいしゅう', 'らいげつ',
-      'リマインダー', 'タスク', '家計簿'
-    ];
-    
-    // 混合語言常見模式
-    this.mixedPatterns = {
-      // 中文為主但包含日文
-      chineseDominant: /^[\u4e00-\u9fff\s\d\-:：.,，。！？]+[\u3040-\u30ff]+/,
-      // 日文為主但包含中文
-      japaneseDominant: /^[\u3040-\u30ff\u4e00-\u9fff\s\d\-:：.,，。！？]*[\u3040-\u30ff]/
-    };
-  }
-
-  /**
-   * 檢測文本語言
-   * @param {string} text - 要檢測的文本
-   * @returns {Object} 語言檢測結果
-   */
-  detectLanguage(text) {
-    if (!text || typeof text !== 'string') {
-      return {
-        primary: 'unknown',
-        confidence: 0,
-        hasMixed: false,
-        details: { chinese: 0, japanese: 0, other: 0 }
-      };
+    constructor() {
+        // 日文字符範圍
+        this.japaneseRegex = /[\u3040-\u309F\u30A0-\u30FF\u31F0-\u31FF]/;
+        
+        // 中文字符範圍
+        this.chineseRegex = /[\u4e00-\u9fff]/;
+        
+        // 日文特有詞彙
+        this.japaneseKeywords = [
+            // 時間相關
+            '時', '分', '秒', '今日', '明日', '昨日', '来週', '来月', '毎日', '毎週',
+            '午前', '午後', '朝', '昼', '夜', '深夜', '夕方',
+            
+            // 動詞和助詞
+            'する', 'です', 'ます', 'だ', 'である', 'の', 'が', 'を', 'に', 'へ', 'で', 'と',
+            'から', 'まで', 'より', 'について', 'において', 'として',
+            
+            // 代辦相關
+            'タスク', 'やること', 'リマインド', '予定', '忘れずに', '覚えている',
+            '追加', '削除', '完了', '終了', '確認', '更新', '編集',
+            
+            // 頻率
+            '毎', 'ごと', '回', '度', '間隔',
+            
+            // 優先級
+            '重要', '緊急', '優先', '普通', '一般'
+        ];
+        
+        // 中文特有詞彙
+        this.chineseKeywords = [
+            // 時間相關
+            '點', '分', '秒', '今天', '明天', '昨天', '下週', '下月', '每天', '每週',
+            '上午', '下午', '早上', '中午', '晚上', '深夜', '傍晚',
+            
+            // 動詞和語氣詞
+            '的', '了', '是', '在', '有', '會', '要', '做', '去', '來',
+            '從', '到', '給', '把', '被', '讓', '使', '對', '向', '往',
+            
+            // 代辦相關
+            '代辦', '任務', '提醒', '要做', '記得', '別忘了', '不要忘記',
+            '新增', '刪除', '完成', '結束', '查看', '修改', '更新',
+            
+            // 頻率
+            '每', '每個', '每次', '次', '遍',
+            
+            // 優先級
+            '重要', '緊急', '優先', '普通', '一般', '不急'
+        ];
+        
+        // 語言特徵權重
+        this.weights = {
+            characters: 0.6,    // 字符類型權重
+            keywords: 0.3,      // 關鍵詞權重
+            grammar: 0.1        // 語法特徵權重
+        };
     }
 
-    const analysis = this._analyzeText(text);
-    const scores = this._calculateLanguageScores(text, analysis);
-    
-    return {
-      primary: this._determinePrimaryLanguage(scores),
-      confidence: this._calculateConfidence(scores),
-      hasMixed: analysis.chineseChars > 0 && analysis.japaneseUniqueChars > 0,
-      details: {
-        chinese: scores.chinese,
-        japanese: scores.japanese,
-        other: scores.other
-      },
-      analysis
-    };
-  }
+    /**
+     * 檢測文本語言
+     */
+    detectLanguage(text) {
+        if (!text || typeof text !== 'string') {
+            return 'zh'; // 預設中文
+        }
 
-  /**
-   * 分析文本字元組成
-   * @private
-   */
-  _analyzeText(text) {
-    let chineseChars = 0;
-    let japaneseUniqueChars = 0; // 只計算平假名和片假名
-    let kanjiChars = 0;          // 漢字（中日共用）
-    let otherChars = 0;
+        const cleanText = text.trim().toLowerCase();
+        if (cleanText.length === 0) {
+            return 'zh';
+        }
 
-    for (const char of text) {
-      if (this.hiraganaRegex.test(char) || this.katakanaRegex.test(char)) {
-        japaneseUniqueChars++;
-      } else if (this.chineseRegex.test(char)) {
-        // 漢字可能是中文也可能是日文，單獨計算
-        kanjiChars++;
-      } else if (/[a-zA-Z0-9\s\-:：.,，。！？]/.test(char)) {
-        // 忽略數字、英文字母、標點符號
-        continue;
-      } else {
-        otherChars++;
-      }
+        const scores = {
+            zh: 0,
+            ja: 0
+        };
+
+        // 1. 字符分析
+        const characterScores = this.analyzeCharacters(cleanText);
+        scores.zh += characterScores.zh * this.weights.characters;
+        scores.ja += characterScores.ja * this.weights.characters;
+
+        // 2. 關鍵詞分析
+        const keywordScores = this.analyzeKeywords(cleanText);
+        scores.zh += keywordScores.zh * this.weights.keywords;
+        scores.ja += keywordScores.ja * this.weights.keywords;
+
+        // 3. 語法特徵分析
+        const grammarScores = this.analyzeGrammar(cleanText);
+        scores.zh += grammarScores.zh * this.weights.grammar;
+        scores.ja += grammarScores.ja * this.weights.grammar;
+
+        // 決定語言
+        return scores.ja > scores.zh ? 'ja' : 'zh';
     }
 
-    // 通過關鍵字來判斷漢字的歸屬
-    const chineseKeywordCount = this._countKeywords(text, this.chineseKeywords);
-    const japaneseKeywordCount = this._countKeywords(text, this.japaneseKeywords);
+    /**
+     * 分析字符類型
+     */
+    analyzeCharacters(text) {
+        const totalChars = text.length;
+        if (totalChars === 0) return { zh: 0, ja: 0 };
 
-    // 根據關鍵字比重來分配漢字
-    const totalKeywords = chineseKeywordCount + japaneseKeywordCount;
-    if (totalKeywords > 0) {
-      const chineseRatio = chineseKeywordCount / totalKeywords;
-      chineseChars = Math.round(kanjiChars * chineseRatio);
-    } else {
-      // 如果沒有明確關鍵字，預設傾向中文（因為漢字使用更頻繁）
-      chineseChars = kanjiChars;
+        let japaneseChars = 0;
+        let chineseChars = 0;
+
+        // 計算日文字符
+        const japaneseMatches = text.match(this.japaneseRegex);
+        if (japaneseMatches) {
+            japaneseChars = japaneseMatches.length;
+        }
+
+        // 計算中文字符
+        const chineseMatches = text.match(this.chineseRegex);
+        if (chineseMatches) {
+            chineseChars = chineseMatches.length;
+        }
+
+        // 特殊情況：如果包含平假名或片假名，強烈偏向日文
+        const hiraganaRegex = /[\u3040-\u309F]/;
+        const katakanaRegex = /[\u30A0-\u30FF]/;
+        
+        let jaBonus = 0;
+        if (hiraganaRegex.test(text)) jaBonus += 0.3;
+        if (katakanaRegex.test(text)) jaBonus += 0.2;
+
+        return {
+            zh: chineseChars / totalChars,
+            ja: (japaneseChars / totalChars) + jaBonus
+        };
     }
 
-    return {
-      chineseChars,
-      japaneseUniqueChars,
-      kanjiChars,
-      otherChars,
-      chineseKeywordCount,
-      japaneseKeywordCount,
-      totalChars: text.length
-    };
-  }
+    /**
+     * 分析關鍵詞
+     */
+    analyzeKeywords(text) {
+        let zhCount = 0;
+        let jaCount = 0;
 
-  /**
-   * 計算語言分數
-   * @private
-   */
-  _calculateLanguageScores(text, analysis) {
-    const {
-      chineseChars,
-      japaneseUniqueChars,
-      chineseKeywordCount,
-      japaneseKeywordCount,
-      totalChars
-    } = analysis;
+        // 檢查中文關鍵詞
+        this.chineseKeywords.forEach(keyword => {
+            if (text.includes(keyword)) {
+                zhCount++;
+            }
+        });
 
-    let chineseScore = 0;
-    let japaneseScore = 0;
+        // 檢查日文關鍵詞
+        this.japaneseKeywords.forEach(keyword => {
+            if (text.includes(keyword)) {
+                jaCount++;
+            }
+        });
 
-    // 基於字元比例的分數
-    if (totalChars > 0) {
-      chineseScore += (chineseChars / totalChars) * 50;
-      japaneseScore += (japaneseUniqueChars / totalChars) * 50;
+        const total = zhCount + jaCount;
+        if (total === 0) return { zh: 0, ja: 0 };
+
+        return {
+            zh: zhCount / total,
+            ja: jaCount / total
+        };
     }
 
-    // 基於關鍵字的分數
-    chineseScore += chineseKeywordCount * 10;
-    japaneseScore += japaneseKeywordCount * 10;
+    /**
+     * 分析語法特徵
+     */
+    analyzeGrammar(text) {
+        let zhScore = 0;
+        let jaScore = 0;
 
-    // 特殊模式加分
-    if (this.mixedPatterns.chineseDominant.test(text)) {
-      chineseScore += 15;
+        // 日文語法特徵
+        const japaneseGrammar = [
+            /です$|だ$/,           // 句尾
+            /ます$|た$/,          // 動詞變位
+            /の|が|を|に|で/,      // 助詞
+            /して|される|れる/,     // 動詞形式
+        ];
+
+        // 中文語法特徵
+        const chineseGrammar = [
+            /的$|了$/,           // 句尾助詞
+            /是|有|會|要/,        // 常用動詞
+            /在|從|到|給/,        // 介詞
+            /不|沒|別|不要/,      // 否定詞
+        ];
+
+        japaneseGrammar.forEach(pattern => {
+            if (pattern.test(text)) {
+                jaScore += 0.1;
+            }
+        });
+
+        chineseGrammar.forEach(pattern => {
+            if (pattern.test(text)) {
+                zhScore += 0.1;
+            }
+        });
+
+        return {
+            zh: Math.min(zhScore, 1),
+            ja: Math.min(jaScore, 1)
+        };
     }
-    if (this.mixedPatterns.japaneseDominant.test(text)) {
-      japaneseScore += 15;
+
+    /**
+     * 檢測混合語言文本
+     */
+    detectMixedLanguage(text) {
+        const sentences = text.split(/[。．！!？?]/);
+        const results = [];
+
+        sentences.forEach((sentence, index) => {
+            if (sentence.trim().length > 0) {
+                const lang = this.detectLanguage(sentence);
+                results.push({
+                    index,
+                    text: sentence.trim(),
+                    language: lang
+                });
+            }
+        });
+
+        return results;
     }
 
-    // 特定字元模式加分
-    if (/[\u3040-\u309f]/.test(text)) { // 平假名
-      japaneseScore += 20;
+    /**
+     * 獲取語言信心度
+     */
+    getLanguageConfidence(text) {
+        const cleanText = text.trim();
+        if (cleanText.length === 0) {
+            return { language: 'zh', confidence: 0 };
+        }
+
+        const scores = {
+            zh: 0,
+            ja: 0
+        };
+
+        // 字符分析
+        const characterScores = this.analyzeCharacters(cleanText);
+        scores.zh += characterScores.zh * this.weights.characters;
+        scores.ja += characterScores.ja * this.weights.characters;
+
+        // 關鍵詞分析
+        const keywordScores = this.analyzeKeywords(cleanText);
+        scores.zh += keywordScores.zh * this.weights.keywords;
+        scores.ja += keywordScores.ja * this.weights.keywords;
+
+        // 語法分析
+        const grammarScores = this.analyzeGrammar(cleanText);
+        scores.zh += grammarScores.zh * this.weights.grammar;
+        scores.ja += grammarScores.ja * this.weights.grammar;
+
+        const language = scores.ja > scores.zh ? 'ja' : 'zh';
+        const confidence = Math.max(scores.zh, scores.ja);
+
+        return {
+            language,
+            confidence: Math.min(confidence, 1),
+            scores: {
+                chinese: scores.zh,
+                japanese: scores.ja
+            }
+        };
     }
-    if (/[\u30a0-\u30ff]/.test(text)) { // 片假名
-      japaneseScore += 15;
+
+    /**
+     * 批量語言檢測
+     */
+    detectLanguageBatch(texts) {
+        return texts.map(text => ({
+            text,
+            ...this.getLanguageConfidence(text)
+        }));
     }
 
-    const otherScore = Math.max(0, 100 - chineseScore - japaneseScore);
-
-    return {
-      chinese: Math.min(100, chineseScore),
-      japanese: Math.min(100, japaneseScore),
-      other: otherScore
-    };
-  }
-
-  /**
-   * 計算關鍵字出現次數
-   * @private
-   */
-  _countKeywords(text, keywords) {
-    return keywords.reduce((count, keyword) => {
-      const regex = new RegExp(keyword, 'g');
-      const matches = text.match(regex);
-      return count + (matches ? matches.length : 0);
-    }, 0);
-  }
-
-  /**
-   * 確定主要語言
-   * @private
-   */
-  _determinePrimaryLanguage(scores) {
-    const { chinese, japanese, other } = scores;
-    
-    if (chinese >= japanese && chinese >= other) {
-      return chinese > 20 ? 'chinese' : 'unknown';
-    } else if (japanese >= chinese && japanese >= other) {
-      return japanese > 20 ? 'japanese' : 'unknown';
-    } else {
-      return other > 50 ? 'other' : 'unknown';
+    /**
+     * 根據用戶ID獲取偏好語言
+     */
+    getUserPreferredLanguage(userId, defaultLang = 'zh') {
+        // 這裡可以從用戶設定中獲取偏好語言
+        // 目前返回預設值
+        return defaultLang;
     }
-  }
 
-  /**
-   * 計算信心度
-   * @private
-   */
-  _calculateConfidence(scores) {
-    const maxScore = Math.max(...Object.values(scores));
-    const secondMaxScore = Object.values(scores)
-      .sort((a, b) => b - a)[1] || 0;
-    
-    // 信心度基於最高分和第二高分的差距
-    const confidence = Math.min(1, (maxScore - secondMaxScore) / 100);
-    return Math.round(confidence * 100) / 100; // 保留兩位小數
-  }
+    /**
+     * 智能語言檢測（結合用戶偏好）
+     */
+    smartDetectLanguage(text, userId = null) {
+        const detectionResult = this.getLanguageConfidence(text);
+        
+        // 如果檢測信心度很低，使用用戶偏好語言
+        if (detectionResult.confidence < 0.3 && userId) {
+            const preferredLang = this.getUserPreferredLanguage(userId);
+            return {
+                ...detectionResult,
+                language: preferredLang,
+                usedUserPreference: true
+            };
+        }
 
-  /**
-   * 判斷是否為時間相關文本
-   * @param {string} text - 文本
-   * @returns {boolean} 是否包含時間相關內容
-   */
-  isTimeRelated(text) {
-    const timeKeywords = [
-      // 中文時間關鍵字
-      '點', '分', '時間', '明天', '後天', '星期', '週', '月', '日',
-      '上午', '下午', '晚上', '早上', '提醒', '定時',
-      
-      // 日文時間關鍵字
-      '時', '分', '時間', '明日', '曜日', '今日', '来週', '来月',
-      '午前', '午後', 'あした', 'きょう', 'リマインダー',
-      
-      // 數字時間格式
-      /\d{1,2}[：:]\d{2}/, // 8:30
-      /\d{1,2}[點時]\d{0,2}[分]?/, // 8點30分
-    ];
-
-    return timeKeywords.some(keyword => {
-      if (keyword instanceof RegExp) {
-        return keyword.test(text);
-      }
-      return text.includes(keyword);
-    });
-  }
-
-  /**
-   * 獲取適合的解析器類型
-   * @param {string} text - 文本
-   * @returns {string} 解析器類型
-   */
-  getParserType(text) {
-    const detection = this.detectLanguage(text);
-    
-    if (detection.hasMixed) {
-      return 'mixed';
+        return {
+            ...detectionResult,
+            usedUserPreference: false
+        };
     }
-    
-    switch (detection.primary) {
-      case 'chinese':
-        return 'chinese';
-      case 'japanese':
-        return 'japanese';
-      default:
-        // 如果語言不明確，但包含時間相關內容，嘗試兩種解析器
-        return this.isTimeRelated(text) ? 'universal' : 'unknown';
+
+    /**
+     * 檢測文本中的語言混用情況
+     */
+    analyzeLanguageMixing(text) {
+        const japaneseRatio = (text.match(this.japaneseRegex) || []).length / text.length;
+        const chineseRatio = (text.match(this.chineseRegex) || []).length / text.length;
+        
+        return {
+            isMixed: japaneseRatio > 0.1 && chineseRatio > 0.1,
+            japaneseRatio,
+            chineseRatio,
+            dominantLanguage: japaneseRatio > chineseRatio ? 'ja' : 'zh'
+        };
     }
-  }
 
-  /**
-   * 標準化文本（清理和預處理）
-   * @param {string} text - 原始文本
-   * @returns {string} 標準化後的文本
-   */
-  normalizeText(text) {
-    if (!text) return '';
+    /**
+     * 驗證語言檢測結果
+     */
+    validateDetection(text, detectedLanguage) {
+        const verification = this.getLanguageConfidence(text);
+        
+        return {
+            isValid: verification.language === detectedLanguage,
+            confidence: verification.confidence,
+            alternative: verification.language !== detectedLanguage ? verification.language : null
+        };
+    }
 
-    return text
-      .trim()
-      .replace(/\s+/g, ' ')           // 多個空格合併為一個
-      .replace(/：/g, ':')            // 全角冒號轉半角
-      .replace(/，/g, ',')            // 全角逗號轉半角
-      .replace(/。/g, '.')            // 全角句號轉半角
-      .replace(/！/g, '!')            // 全角驚嘆號轉半角
-      .replace(/？/g, '?');           // 全角問號轉半角
-  }
+    /**
+     * 獲取語言特定的處理建議
+     */
+    getProcessingSuggestions(language) {
+        const suggestions = {
+            zh: {
+                timeFormat: '24小時制，使用"點"表示小時',
+                dateFormat: 'YYYY年MM月DD日',
+                weekdays: ['日', '一', '二', '三', '四', '五', '六'],
+                commonPhrases: ['今天', '明天', '下週', '每天'],
+                punctuation: ['。', '，', '！', '？']
+            },
+            ja: {
+                timeFormat: '24小時制，使用"時"表示小時',
+                dateFormat: 'YYYY年MM月DD日',
+                weekdays: ['日', '月', '火', '水', '木', '金', '土'],
+                commonPhrases: ['今日', '明日', '来週', '毎日'],
+                punctuation: ['。', '、', '！', '？']
+            }
+        };
+
+        return suggestions[language] || suggestions.zh;
+    }
+
+    /**
+     * 語言統計分析
+     */
+    getLanguageStats(text) {
+        const totalChars = text.length;
+        const japaneseChars = (text.match(this.japaneseRegex) || []).length;
+        const chineseChars = (text.match(this.chineseRegex) || []).length;
+        const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+        const numbers = (text.match(/\d/g) || []).length;
+        const punctuation = (text.match(/[。，、！？．,!?.]/g) || []).length;
+        const other = totalChars - japaneseChars - chineseChars - englishChars - numbers - punctuation;
+
+        return {
+            total: totalChars,
+            japanese: {
+                count: japaneseChars,
+                percentage: (japaneseChars / totalChars * 100).toFixed(2)
+            },
+            chinese: {
+                count: chineseChars,
+                percentage: (chineseChars / totalChars * 100).toFixed(2)
+            },
+            english: {
+                count: englishChars,
+                percentage: (englishChars / totalChars * 100).toFixed(2)
+            },
+            numbers: {
+                count: numbers,
+                percentage: (numbers / totalChars * 100).toFixed(2)
+            },
+            punctuation: {
+                count: punctuation,
+                percentage: (punctuation / totalChars * 100).toFixed(2)
+            },
+            other: {
+                count: other,
+                percentage: (other / totalChars * 100).toFixed(2)
+            }
+        };
+    }
 }
 
-module.exports = LanguageParser;
+// 創建單例實例
+const languageParser = new LanguageParser();
+
+// 導出檢測函數
+function detectLanguage(text) {
+    return languageParser.detectLanguage(text);
+}
+
+function getLanguageConfidence(text) {
+    return languageParser.getLanguageConfidence(text);
+}
+
+function smartDetectLanguage(text, userId = null) {
+    return languageParser.smartDetectLanguage(text, userId);
+}
+
+module.exports = {
+    LanguageParser,
+    languageParser,
+    detectLanguage,
+    getLanguageConfidence,
+    smartDetectLanguage
+};
