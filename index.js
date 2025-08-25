@@ -717,27 +717,28 @@ async function calculateBudgetRemaining(language = 'zh') {
                 `💵 残り：${remaining.toLocaleString('ja-JP')}円\n` +
                 `📅 1日使用可能：${dailyAllowance.toLocaleString('ja-JP')}円\n` +
                 `📊 記録数：${expenseCount}件${warningMessage}`
-      };
-    } else {
-      return {
-        hasBudget: true,
-        remaining: remaining,
+       };
+} else {
+  return {
+    hasBudget: true,
+    remaining: remaining,
     message: `${statusIcon} 本月預算狀況\n` +
              `💰 預算：${budget.toLocaleString('zh-TW')} 円\n` +
              `💸 支出：${totalExpense.toLocaleString('zh-TW')} 円 (${usagePercentage}%)\n` +
              `💵 剩餘：${remaining.toLocaleString('zh-TW')} 円\n` +
              `📅 每日可用：${dailyAllowance.toLocaleString('zh-TW')} 円\n`
   };
+}
 
-
-  } catch (error) {
-    console.error('計算剩餘預算時發生錯誤:', error);
-    return {
-      hasBudget: false,
-      message: language === 'ja' ? 
-        '予算計算中にエラーが発生しました' : 
-        '預算計算時發生錯誤'
-    };
+} catch (error) {
+  console.error('計算剩餘預算時發生錯誤:', error);
+  return {
+    hasBudget: false,
+    message: language === 'ja' ? 
+      '予算計算中にエラーが発生しました' : 
+      '預算計算時發生錯誤'
+  };
+}
   }
 }
 
