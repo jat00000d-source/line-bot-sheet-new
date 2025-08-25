@@ -1,249 +1,572 @@
-// constants/dateTimeConstants.js
-// 時間解析相關的所有常數定義
-
-const TIME_PATTERNS = {
-  // 中文時間模式
-  chinese: {
-    // 絕對時間
-    absoluteTime: [
-      /(\d{1,2})點(\d{1,2})分?/,  // 8點30分
-      /(\d{1,2})點/,              // 8點
-      /上午(\d{1,2})點(\d{1,2})分?/, // 上午8點30分
-      /下午(\d{1,2})點(\d{1,2})分?/, // 下午2點30分
-      /晚上(\d{1,2})點(\d{1,2})分?/, // 晚上8點30分
-      /(\d{1,2}):(\d{2})/,        // 8:30
-    ],
-    
-    // 相對日期
-    relativeDate: [
-      /今天|今日/,
-      /明天|明日/,
-      /後天/,
-      /大後天/,
-      /下週|下星期/,
-      /下個月|下月/,
-      /下個禮拜/,
-    ],
-    
-    // 星期
-    weekdays: [
-      /星期[一二三四五六日天]/,
-      /週[一二三四五六日天]/,
-      /禮拜[一二三四五六日天]/,
-    ],
-    
-    // 日期格式
-    dateFormats: [
-      /(\d{4})[年\/\-](\d{1,2})[月\/\-](\d{1,2})日?/, // 2024年12月25日
-      /(\d{1,2})[月\/\-](\d{1,2})日?/,               // 12月25日
-      /(\d{1,2})號/,                                  // 25號
-    ],
-    
-    // 重複模式
-    repeatPatterns: [
-      /每天|每日/,
-      /每週|每星期|每禮拜/,
-      /每月|每個月/,
-      /每年|每一年/,
-      /每(\d+)天/,
-      /每(\d+)週/,
-      /每(\d+)個月/,
-    ]
-  },
-  
-  // 日文時間模式
-  japanese: {
-    // 絕對時間
-    absoluteTime: [
-      /(\d{1,2})時(\d{1,2})分/,   // 8時30分
-      /(\d{1,2})時/,              // 8時
-      /午前(\d{1,2})時(\d{1,2})分?/, // 午前8時30分
-      /午後(\d{1,2})時(\d{1,2})分?/, // 午後2時30分
-      /夜(\d{1,2})時(\d{1,2})分?/,   // 夜8時30分
-    ],
-    
-    // 相對日期
-    relativeDate: [
-      /今日|きょう/,
-      /明日|あした|あす/,
-      /明後日|あさって/,
-      /明々後日|しあさって/,
-      /来週|らいしゅう/,
-      /来月|らいげつ/,
-      /来年|らいねん/,
-    ],
-    
-    // 星期
-    weekdays: [
-      /[月火水木金土日]曜日?/,
-    ],
-    
-    // 日期格式
-    dateFormats: [
-      /(\d{4})年(\d{1,2})月(\d{1,2})日/, // 2024年12月25日
-      /(\d{1,2})月(\d{1,2})日/,         // 12月25日
-      /(\d{1,2})日/,                    // 25日
-    ],
-    
-    // 重複模式
-    repeatPatterns: [
-      /毎日|まいにち/,
-      /毎週|まいしゅう/,
-      /毎月|まいつき/,
-      /毎年|まいとし|まいねん/,
-      /(\d+)日毎/,
-      /(\d+)週間毎/,
-      /(\d+)ヶ月毎/,
-    ]
-  }
+const DATETIME_PATTERNS = {
+    zh: {
+        absolute: [
+            // 完整日期時間：2024年1月15日 14點30分
+            {
+                regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
+                parser: (match) => {
+                    const year = parseInt(match[1]);
+                    const month = parseInt(match[2]) - 1; // JavaScript 月份從0開始
+                    const day = parseInt(match[3]);
+                    const hour = parseInt(match[4]);
+                    const minute = parseInt(match[5]) || 0;
+                    return new Date(year, month, day, hour, minute);
+                }
+            },
+            // 月日時間：1月15日 14點30分
+            {
+                regex: /(\d{1,2})月(\d{1,2})[日號]\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
+                parser: (match) => {
+                    const now = new Date();
+                    const month = parseInt(match[1]) - 1;
+                    const day = parseInt(match[2]);
+                    const hour = parseInt(match[3]);
+                    const minute = parseInt(match[4]) || 0;
+                    let year = now.getFullYear();
+                    
+                    // 如果指定的日期已過，則為明年
+                    const targetDate = new Date(year, month, day, hour, minute);
+                    if (targetDate < now) {
+                        year++;
+                    }
+                    
+                    return new Date(year, month, day, hour, minute);
+                }
+            },
+            // 僅時間：14點30分
+            {
+                regex: /(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
+                parser: (match) => {
+                    const now = new Date();
+                    const hour = parseInt(match[1]);
+                    const minute = parseInt(match[2]) || 0;
+                    const result = new Date(now);
+                    result.setHours(hour, minute, 0, 0);
+                    
+                    // 如果時間已過，則為明天
+                    if (result < now) {
+                        result.setDate(result.getDate() + 1);
+                    }
+                    
+                    return result;
+                }
+            }
+        ],
+        relative: [
+            // 明天 X點
+            {
+                regex: /明天\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
+                parser: (match, baseTime) => {
+                    const hour = parseInt(match[1]);
+                    const minute = parseInt(match[2]) || 0;
+                    const result = new Date(baseTime);
+                    result.setDate(result.getDate() + 1);
+                    result.setHours(hour, minute, 0, 0);
+                    return result;
+                }
+            },
+            // 後天 X點
+            {
+                regex: /後天\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
+                parser: (match, baseTime) => {
+                    const hour = parseInt(match[1]);
+                    const minute = parseInt(match[2]) || 0;
+                    const result = new Date(baseTime);
+                    result.setDate(result.getDate() + 2);
+                    result.setHours(hour, minute, 0, 0);
+                    return result;
+                }
+            },
+            // X小時後
+            {
+                regex: /(\d+)\s*[個个]?小[時时]後/,
+                parser: (match, baseTime) => {
+                    const hours = parseInt(match[1]);
+                    const result = new Date(baseTime);
+                    result.setHours(result.getHours() + hours);
+                    return result;
+                }
+            },
+            // X分鐘後
+            {
+                regex: /(\d+)\s*分[鐘钟]後/,
+                parser: (match, baseTime) => {
+                    const minutes = parseInt(match[1]);
+                    const result = new Date(baseTime);
+                    result.setMinutes(result.getMinutes() + minutes);
+                    return result;
+                }
+            },
+            // 下週X
+            {
+                regex: /下[週周星期]([一二三四五六日天])\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
+                parser: (match, baseTime) => {
+                    const weekdayMap = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0};
+                    const targetWeekday = weekdayMap[match[1]];
+                    const hour = parseInt(match[2]);
+                    const minute = parseInt(match[3]) || 0;
+                    
+                    const result = new Date(baseTime);
+                    const currentWeekday = result.getDay();
+                    let daysToAdd = targetWeekday - currentWeekday + 7;
+                    
+                    result.setDate(result.getDate() + daysToAdd);
+                    result.setHours(hour, minute, 0, 0);
+                    return result;
+                }
+            }
+        ],
+        recurring: [
+            // 每天
+            {
+                regex: /每天\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
+                parser: (match) => ({
+                    type: 'daily',
+                    time: {
+                        hour: parseInt(match[1]),
+                        minute: parseInt(match[2]) || 0
+                    }
+                })
+            },
+            // 每週
+            {
+                regex: /每[週周]([一二三四五六日天,、\s]+)\s*(\d{1,2})[點点时]\s*(\d{1,2})?分?/,
+                parser: (match) => {
+                    const weekdayMap = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0};
+                    const weekdayText = match[1];
+                    const weekdays = [];
+                    
+                    Object.keys(weekdayMap).forEach(day => {
+                        if (weekdayText.includes(day)) {
+                            weekdays.push(weekdayMap[day]);
+                        }
+                    });
+                    
+                    return {
+                        type: 'weekly',
+                        weekdays: weekdays,
+                        time: {
+                            hour: parseInt(match[2]),
+                            minute: parseInt(match[3]) || 0
+                        }
+                    };
+                }
+            }
+        ]
+    },
+    ja: {
+        absolute: [
+            // 完整日期時間：2024年1月15日 14時30分
+            {
+                regex: /(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
+                parser: (match) => {
+                    const year = parseInt(match[1]);
+                    const month = parseInt(match[2]) - 1;
+                    const day = parseInt(match[3]);
+                    const hour = parseInt(match[4]);
+                    const minute = parseInt(match[5]) || 0;
+                    return new Date(year, month, day, hour, minute);
+                }
+            },
+            // 月日時間：1月15日 14時30分
+            {
+                regex: /(\d{1,2})月(\d{1,2})日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
+                parser: (match) => {
+                    const now = new Date();
+                    const month = parseInt(match[1]) - 1;
+                    const day = parseInt(match[2]);
+                    const hour = parseInt(match[3]);
+                    const minute = parseInt(match[4]) || 0;
+                    let year = now.getFullYear();
+                    
+                    const targetDate = new Date(year, month, day, hour, minute);
+                    if (targetDate < now) {
+                        year++;
+                    }
+                    
+                    return new Date(year, month, day, hour, minute);
+                }
+            },
+            // 僅時間：14時30分
+            {
+                regex: /(\d{1,2})[時时]\s*(\d{1,2})?分?/,
+                parser: (match) => {
+                    const now = new Date();
+                    const hour = parseInt(match[1]);
+                    const minute = parseInt(match[2]) || 0;
+                    const result = new Date(now);
+                    result.setHours(hour, minute, 0, 0);
+                    
+                    if (result < now) {
+                        result.setDate(result.getDate() + 1);
+                    }
+                    
+                    return result;
+                }
+            }
+        ],
+        relative: [
+            // 明日 X時
+            {
+                regex: /明日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
+                parser: (match, baseTime) => {
+                    const hour = parseInt(match[1]);
+                    const minute = parseInt(match[2]) || 0;
+                    const result = new Date(baseTime);
+                    result.setDate(result.getDate() + 1);
+                    result.setHours(hour, minute, 0, 0);
+                    return result;
+                }
+            },
+            // 来週X曜日
+            {
+                regex: /来[週周]([月火水木金土日])[曜日]*\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
+                parser: (match, baseTime) => {
+                    const weekdayMap = {'月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6, '日': 0};
+                    const targetWeekday = weekdayMap[match[1]];
+                    const hour = parseInt(match[2]);
+                    const minute = parseInt(match[3]) || 0;
+                    
+                    const result = new Date(baseTime);
+                    const currentWeekday = result.getDay();
+                    let daysToAdd = targetWeekday - currentWeekday + 7;
+                    
+                    result.setDate(result.getDate() + daysToAdd);
+                    result.setHours(hour, minute, 0, 0);
+                    return result;
+                }
+            }
+        ],
+        recurring: [
+            // 毎日
+            {
+                regex: /毎日\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
+                parser: (match) => ({
+                    type: 'daily',
+                    time: {
+                        hour: parseInt(match[1]),
+                        minute: parseInt(match[2]) || 0
+                    }
+                })
+            },
+            // 毎週
+            {
+                regex: /毎[週周]([月火水木金土日,、\s]+)[曜日]*\s*(\d{1,2})[時时]\s*(\d{1,2})?分?/,
+                parser: (match) => {
+                    const weekdayMap = {'月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6, '日': 0};
+                    const weekdayText = match[1];
+                    const weekdays = [];
+                    
+                    Object.keys(weekdayMap).forEach(day => {
+                        if (weekdayText.includes(day)) {
+                            weekdays.push(weekdayMap[day]);
+                        }
+                    });
+                    
+                    return {
+                        type: 'weekly',
+                        weekdays: weekdays,
+                        time: {
+                            hour: parseInt(match[2]),
+                            minute: parseInt(match[3]) || 0
+                        }
+                    };
+                }
+            }
+        ]
+    }
 };
 
-// 時間關鍵字映射
+const WEEKDAY_NAMES = {
+    zh: ['日', '一', '二', '三', '四', '五', '六'],
+    ja: ['日', '月', '火', '水', '木', '金', '土']
+};
+
+const MONTH_NAMES = {
+    zh: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+    ja: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+};
+
 const TIME_KEYWORDS = {
-  chinese: {
-    // 時間段
-    morning: ['上午', '早上', '早晨', '清晨'],
-    afternoon: ['下午', '午後'],
-    evening: ['晚上', '夜晚', '傍晚'],
-    night: ['深夜', '半夜'],
-    
-    // 相對時間
-    relative: {
-      '今天': 0,
-      '今日': 0,
-      '明天': 1,
-      '明日': 1,
-      '後天': 2,
-      '大後天': 3,
+    zh: {
+        now: ['現在', '立刻', '馬上'],
+        today: ['今天', '今日'],
+        tomorrow: ['明天', '明日'],
+        yesterday: ['昨天', '昨日'],
+        thisWeek: ['這週', '本週'],
+        nextWeek: ['下週', '下星期'],
+        thisMonth: ['這個月', '本月'],
+        nextMonth: ['下個月', '下月'],
+        morning: ['早上', '上午', '晨間'],
+        afternoon: ['下午', '午後'],
+        evening: ['傍晚', '晚上', '夜間'],
+        night: ['深夜', '半夜']
     },
-    
-    // 星期映射
-    weekdays: {
-      '星期一': 1, '週一': 1, '禮拜一': 1,
-      '星期二': 2, '週二': 2, '禮拜二': 2,
-      '星期三': 3, '週三': 3, '禮拜三': 3,
-      '星期四': 4, '週四': 4, '禮拜四': 4,
-      '星期五': 5, '週五': 5, '禮拜五': 5,
-      '星期六': 6, '週六': 6, '禮拜六': 6,
-      '星期日': 0, '週日': 0, '禮拜日': 0,
-      '星期天': 0, '週天': 0, '禮拜天': 0,
-    },
-    
-    // 月份
-    months: {
-      '一月': 1, '二月': 2, '三月': 3, '四月': 4,
-      '五月': 5, '六月': 6, '七月': 7, '八月': 8,
-      '九月': 9, '十月': 10, '十一月': 11, '十二月': 12,
+    ja: {
+        now: ['今', 'いま', '今すぐ'],
+        today: ['今日', 'きょう'],
+        tomorrow: ['明日', 'あした', 'あす'],
+        yesterday: ['昨日', 'きのう'],
+        thisWeek: ['今週', 'こんしゅう'],
+        nextWeek: ['来週', 'らいしゅう'],
+        thisMonth: ['今月', 'こんげつ'],
+        nextMonth: ['来月', 'らいげつ'],
+        morning: ['朝', 'あさ', '午前'],
+        afternoon: ['午後', 'ごご'],
+        evening: ['夕方', 'ゆうがた', '夜'],
+        night: ['深夜', '夜中']
     }
-  },
-  
-  japanese: {
-    // 時間段
-    morning: ['午前', 'ごぜん', '朝', 'あさ'],
-    afternoon: ['午後', 'ごご', '昼', 'ひる'],
-    evening: ['夕方', 'ゆうがた', '夜', 'よる'],
-    night: ['深夜', 'しんや', '夜中', 'よなか'],
-    
-    // 相對時間
-    relative: {
-      '今日': 0, 'きょう': 0,
-      '明日': 1, 'あした': 1, 'あす': 1,
-      '明後日': 2, 'あさって': 2,
-      '明々後日': 3, 'しあさって': 3,
+};
+
+const FUZZY_TIME_MAP = {
+    zh: {
+        '早上': {hour: 8, minute: 0},
+        '上午': {hour: 9, minute: 0},
+        '中午': {hour: 12, minute: 0},
+        '下午': {hour: 14, minute: 0},
+        '傍晚': {hour: 18, minute: 0},
+        '晚上': {hour: 20, minute: 0},
+        '深夜': {hour: 23, minute: 0},
+        '半夜': {hour: 0, minute: 0}
     },
-    
-    // 星期映射
-    weekdays: {
-      '月曜日': 1, '月曜': 1,
-      '火曜日': 2, '火曜': 2,
-      '水曜日': 3, '水曜': 3,
-      '木曜日': 4, '木曜': 4,
-      '金曜日': 5, '金曜': 5,
-      '土曜日': 6, '土曜': 6,
-      '日曜日': 0, '日曜': 0,
-    },
-    
-    // 月份
-    months: {
-      '一月': 1, '二月': 2, '三月': 3, '四月': 4,
-      '五月': 5, '六月': 6, '七月': 7, '八月': 8,
-      '九月': 9, '十月': 10, '十一月': 11, '十二月': 12,
+    ja: {
+        '朝': {hour: 8, minute: 0},
+        '午前': {hour: 9, minute: 0},
+        '昼': {hour: 12, minute: 0},
+        '午後': {hour: 14, minute: 0},
+        '夕方': {hour: 18, minute: 0},
+        '夜': {hour: 20, minute: 0},
+        '深夜': {hour: 23, minute: 0},
+        '夜中': {hour: 0, minute: 0}
     }
-  }
 };
 
-// 重複間隔類型
-const REPEAT_TYPES = {
-  NONE: 'none',        // 不重複
-  DAILY: 'daily',      // 每日
-  WEEKLY: 'weekly',    // 每週
-  MONTHLY: 'monthly',  // 每月
-  YEARLY: 'yearly',    // 每年
-  CUSTOM: 'custom',    // 自定義間隔
+const RECURRING_KEYWORDS = {
+    zh: {
+        daily: ['每天', '每日', '天天'],
+        weekly: ['每週', '每星期', '週週'],
+        monthly: ['每月', '月月'],
+        yearly: ['每年', '年年']
+    },
+    ja: {
+        daily: ['毎日', 'まいにち'],
+        weekly: ['毎週', 'まいしゅう'],
+        monthly: ['毎月', 'まいつき'],
+        yearly: ['毎年', 'まいねん', '毎年']
+    }
 };
 
-// 優先級定義
-const PRIORITY_LEVELS = {
-  LOW: 1,
-  MEDIUM: 2,
-  HIGH: 3,
-  URGENT: 4,
+const DURATION_PATTERNS = {
+    zh: {
+        minutes: /(\d+)\s*分[鐘钟]/,
+        hours: /(\d+)\s*[個个]?小[時时]/,
+        days: /(\d+)\s*[天日]/,
+        weeks: /(\d+)\s*[個个]?[週周星期]/,
+        months: /(\d+)\s*[個个]?月/,
+        years: /(\d+)\s*年/
+    },
+    ja: {
+        minutes: /(\d+)\s*分/,
+        hours: /(\d+)\s*[時间]間/,
+        days: /(\d+)\s*日/,
+        weeks: /(\d+)\s*週間?/,
+        months: /(\d+)\s*ヶ?月/,
+        years: /(\d+)\s*年/
+    }
 };
 
-// 提醒狀態
-const REMINDER_STATUS = {
-  ACTIVE: 'active',
-  PAUSED: 'paused',
-  COMPLETED: 'completed',
-  CANCELLED: 'cancelled',
+const RELATIVE_TIME_PATTERNS = {
+    zh: {
+        after: /(\d+)\s*(分[鐘钟]|小[時时]|天|[週周]|月|年)[後后]/,
+        before: /(\d+)\s*(分[鐘钟]|小[時时]|天|[週周]|月|年)[前]/,
+        in: /(\d+)\s*(分[鐘钟]|小[時时]|天|[週周]|月|年)[內内]/
+    },
+    ja: {
+        after: /(\d+)\s*(分|[時间]間|日|週間?|ヶ?月|年)後/,
+        before: /(\d+)\s*(分|[時间]間|日|週間?|ヶ?月|年)前/,
+        in: /(\d+)\s*(分|[時间]間|日|週間?|ヶ?月|年)[內内以]/
+    }
 };
 
-// 時區設定
-const TIMEZONE = 'Asia/Taipei';
+const PRIORITY_KEYWORDS = {
+    zh: {
+        high: ['緊急', '重要', '優先', '高優先級'],
+        medium: ['普通', '一般', '中等'],
+        low: ['不急', '低優先級', '有空再做']
+    },
+    ja: {
+        high: ['緊急', '重要', '優先', '高優先度'],
+        medium: ['普通', '一般', '中程度'],
+        low: ['急がない', '低優先度', '時間があるとき']
+    }
+};
 
-// 日期時間格式
+const LOCATION_PATTERNS = {
+    zh: {
+        at: /在\s*(.+?)\s*(提醒|做|完成)/,
+        near: /[靠近附近]\s*(.+?)\s*(提醒|做|完成)/,
+        address: /([\u4e00-\u9fff]+[市區縣鄉鎮村里路街巷弄號樓室][\d\w\-]*)/
+    },
+    ja: {
+        at: /(.+?)で\s*(リマインド|する|完成)/,
+        near: /(.+?)[のの近く付近]\s*で\s*(リマインド|する|完成)/,
+        address: /([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]+[都道府県市区町村字][\d\w\-]*)/
+    }
+};
+
+const COMMAND_PATTERNS = {
+    zh: {
+        add: /[新增加創建]\s*(提醒|代辦|任務)/,
+        list: /[查看列出顯示]\s*(提醒|代辦|任務)/,
+        delete: /[刪除移除取消]\s*(提醒|代辦|任務)/,
+        complete: /[完成標記結束]\s*(提醒|代辦|任務)/,
+        update: /[修改更新編輯]\s*(提醒|代辦|任務)/,
+        search: /[搜尋搜索查找]\s*(提醒|代辦|任務)/
+    },
+    ja: {
+        add: /[追加新規作成]\s*(リマインド|タスク|予定)/,
+        list: /[表示一覧確認]\s*(リマインド|タスク|予定)/,
+        delete: /[削除除去取消]\s*(リマインド|タスク|予定)/,
+        complete: /[完了終了]\s*(リマインド|タスク|予定)/,
+        update: /[更新編集修正]\s*(リマインド|タスク|予定)/,
+        search: /[検索探す]\s*(リマインド|タスク|予定)/
+    }
+};
+
 const DATE_FORMATS = {
-  ISO: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
-  DISPLAY: 'YYYY年MM月DD日 HH:mm',
-  TIME_ONLY: 'HH:mm',
-  DATE_ONLY: 'YYYY-MM-DD',
+    zh: [
+        'YYYY年MM月DD日',
+        'MM月DD日',
+        'YYYY-MM-DD',
+        'MM-DD',
+        'M/D',
+        'YYYY/MM/DD'
+    ],
+    ja: [
+        'YYYY年MM月DD日',
+        'MM月DD日',
+        'YYYY-MM-DD',
+        'MM-DD',
+        'M/D',
+        'YYYY/MM/DD'
+    ]
 };
 
-// 驗證規則
+const TIME_FORMATS = {
+    zh: [
+        'HH點mm分',
+        'HH點',
+        'HH:mm',
+        'HH時mm分',
+        'H點',
+        'H時'
+    ],
+    ja: [
+        'HH時mm分',
+        'HH時',
+        'HH:mm',
+        'H時mm分',
+        'H時'
+    ]
+};
+
 const VALIDATION_RULES = {
-  // 時間範圍（24小時制）
-  VALID_HOURS: { min: 0, max: 23 },
-  VALID_MINUTES: { min: 0, max: 59 },
-  
-  // 日期範圍
-  VALID_DAYS: { min: 1, max: 31 },
-  VALID_MONTHS: { min: 1, max: 12 },
-  
-  // 重複間隔限制
-  MAX_CUSTOM_INTERVAL_DAYS: 365,
-  MIN_CUSTOM_INTERVAL_DAYS: 1,
-  
-  // 提醒數量限制
-  MAX_REMINDERS_PER_USER: 100,
+    minYear: 2024,
+    maxYear: 2030,
+    minHour: 0,
+    maxHour: 23,
+    minMinute: 0,
+    maxMinute: 59,
+    maxDaysInFuture: 365 * 2, // 2年
+    minMinutesFromNow: 1 // 至少1分鐘後
 };
 
-// 錯誤訊息類型
-const ERROR_TYPES = {
-  INVALID_TIME_FORMAT: 'invalid_time_format',
-  INVALID_DATE_FORMAT: 'invalid_date_format',
-  PAST_DATE_TIME: 'past_date_time',
-  INVALID_REPEAT_PATTERN: 'invalid_repeat_pattern',
-  MAX_REMINDERS_EXCEEDED: 'max_reminders_exceeded',
+const DEFAULT_TIMES = {
+    morning: {hour: 9, minute: 0},
+    afternoon: {hour: 14, minute: 0},
+    evening: {hour: 18, minute: 0},
+    night: {hour: 21, minute: 0}
+};
+
+const SPECIAL_DATES = {
+    zh: {
+        '今天': 0,
+        '明天': 1,
+        '後天': 2,
+        '大後天': 3
+    },
+    ja: {
+        '今日': 0,
+        '明日': 1,
+        '明後日': 2,
+        '明々後日': 3
+    }
+};
+
+const ORDINAL_NUMBERS = {
+    zh: {
+        '第一': 1, '第二': 2, '第三': 3, '第四': 4, '第五': 5,
+        '第六': 6, '第七': 7, '第八': 8, '第九': 9, '第十': 10,
+        '第十一': 11, '第十二': 12, '第十三': 13, '第十四': 14, '第十五': 15,
+        '第十六': 16, '第十七': 17, '第十八': 18, '第十九': 19, '第二十': 20,
+        '第二十一': 21, '第二十二': 22, '第二十三': 23, '第二十四': 24, '第二十五': 25,
+        '第二十六': 26, '第二十七': 27, '第二十八': 28, '第二十九': 29, '第三十': 30, '第三十一': 31
+    },
+    ja: {
+        '第一': 1, '第二': 2, '第三': 3, '第四': 4, '第五': 5,
+        '第六': 6, '第七': 7, '第八': 8, '第九': 9, '第十': 10,
+        '一日': 1, '二日': 2, '三日': 3, '四日': 4, '五日': 5,
+        '六日': 6, '七日': 7, '八日': 8, '九日': 9, '十日': 10,
+        '十一日': 11, '十二日': 12, '十三日': 13, '十四日': 14, '十五日': 15,
+        '十六日': 16, '十七日': 17, '十八日': 18, '十九日': 19, '二十日': 20,
+        '二十一日': 21, '二十二日': 22, '二十三日': 23, '二十四日': 24, '二十五日': 25,
+        '二十六日': 26, '二十七日': 27, '二十八日': 28, '二十九日': 29, '三十日': 30, '三十一日': 31
+    }
+};
+
+const NUMBER_WORDS = {
+    zh: {
+        '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+        '十': 10, '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15,
+        '十六': 16, '十七': 17, '十八': 18, '十九': 19, '二十': 20,
+        '二十一': 21, '二十二': 22, '二十三': 23, '二十四': 24, '二十五': 25,
+        '二十六': 26, '二十七': 27, '二十八': 28, '二十九': 29, '三十': 30
+    },
+    ja: {
+        '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+        '十': 10, '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15,
+        '十六': 16, '十七': 17, '十八': 18, '十九': 19, '二十': 20,
+        '二十一': 21, '二十二': 22, '二十三': 23, '二十四': 24
+    }
+};
+
+const TIMEZONE_OFFSETS = {
+    'Asia/Taipei': 8,
+    'Asia/Tokyo': 9,
+    'Asia/Shanghai': 8,
+    'UTC': 0,
+    'America/New_York': -5,
+    'Europe/London': 0
 };
 
 module.exports = {
-  TIME_PATTERNS,
-  TIME_KEYWORDS,
-  REPEAT_TYPES,
-  PRIORITY_LEVELS,
-  REMINDER_STATUS,
-  TIMEZONE,
-  DATE_FORMATS,
-  VALIDATION_RULES,
-  ERROR_TYPES,
+    DATETIME_PATTERNS,
+    WEEKDAY_NAMES,
+    MONTH_NAMES,
+    TIME_KEYWORDS,
+    FUZZY_TIME_MAP,
+    RECURRING_KEYWORDS,
+    DURATION_PATTERNS,
+    RELATIVE_TIME_PATTERNS,
+    PRIORITY_KEYWORDS,
+    LOCATION_PATTERNS,
+    COMMAND_PATTERNS,
+    DATE_FORMATS,
+    TIME_FORMATS,
+    VALIDATION_RULES,
+    DEFAULT_TIMES,
+    SPECIAL_DATES,
+    ORDINAL_NUMBERS,
+    NUMBER_WORDS,
+    TIMEZONE_OFFSETS
 };
