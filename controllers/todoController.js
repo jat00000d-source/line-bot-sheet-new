@@ -1,728 +1,205 @@
-const TodoService = require('../services/todoService');
-const { TODO_MESSAGES, COMMAND_KEYWORDS, QUICK_REPLY_BUTTONS } = require('../constants/todoMessages');
+// 逐步添加功能的 index.js
+const line = require('@line/bot-sdk');
+const express = require('express');
 
-class TodoController {
-    constructor(googleSheetsService, languageParser, lineClient) {
-        this.todoService = new TodoService(googleSheetsService);
-        this.languageParser = languageParser;
-        this.lineClient = lineClient;
-    }
+// LINE Bot 設定
+const config = {
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.CHANNEL_SECRET,
+};
 
-    // 處理代辦相關指令
-    async handleTodoCommand(event) {
-        try {
-            const userId = event.source.userId;
-            const messageText = event.message.text.trim();
-            
-            // 識別語言
-            const language = this.languageParser.detectLanguage(messageText);
-            
-            // 解析指令
-            const commandInfo = this.parseCommand(messageText, language);
-            
-            switch (commandInfo.action) {
-                case 'add':
-                    return await this.handleAddTodo(userId, commandInfo, language);
-                    
-                case 'list':
-                    return await this.handleListTodos(userId, commandInfo, language);
-                    
-                case 'complete':
-                    return await this.handleCompleteTodo(userId, commandInfo, language);
-                    
-                case 'delete':
-                    return await this.handleDeleteTodo(userId, commandInfo, language);
-                    
-                case 'search':
-                    return await this.handleSearchTodos(userId, commandInfo, language);
-                    
-                case 'stats':
-                    return await this.handleGetStats(userId, language);
-                    
-                case 'help':
-                    return await this.handleHelp(userId, language);
-                    
-                default:
-                    return await this.handleUnknownCommand(userId, language);
-            }
-        } catch (error) {
-            console.error('Error handling todo command:', error);
-            return await this.sendErrorMessage(event.source.userId, error.message);
-        }
-    }
+const client = new line.Client(config);
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-    // 解析指令
-    parseCommand(text, language) {
-        const keywords = COMMAND_KEYWORDS[language];
-        const lowerText = text.toLowerCase();
-        
-        // 新增代辦
-        if (keywords.addTodo.some(keyword => lowerText.includes(keyword))) {
-            const title = this.extractTodoTitle(text, keywords.addTodo);
-            const priority = this.extractPriority(text, language);
-            
-            return {
-                action: 'add',
-                title,
-                priority,
-                originalText: text
-            };
-        }
-        
-        // 完成代辦
-        if (keywords.completeTodo.some(keyword => lowerText.includes(keyword))) {
-            const todoId = this.extractTodoId(text);
-            return {
-                action: 'complete',
-                todoId,
-                originalText: text
-            };
-        }
-        
-        // 刪除代辦
-        if (keywords.deleteTodo.some(keyword => lowerText.includes(keyword))) {
-            const todoId = this.extractTodoId(text);
-            return {
-                action: 'delete',
-                todoId,
-                originalText: text
-            };
-        }
-        
-        // 查看列表
-        if (keywords.listTodos.some(keyword => lowerText.includes(keyword))) {
-            const filter = this.extractListFilter(text, language);
-            return {
-                action: 'list',
-                filter,
-                originalText: text
-            };
-        }
-        
-        // 搜尋
-        if (lowerText.includes('搜尋') || lowerText.includes('搜索') || lowerText.includes('検索')) {
-            const searchTerm = this.extractSearchTerm(text);
-            return {
-                action: 'search',
-                searchTerm,
-                originalText: text
-            };
-        }
-        
-        // 統計
-        if (lowerText.includes('統計') || lowerText.includes('stats') || lowerText.includes('統計')) {
-            return {
-                action: 'stats',
-                originalText: text
-            };
-        }
-        
-        // 說明
-        if (keywords.help.some(keyword => lowerText.includes(keyword))) {
-            return {
-                action: 'help',
-                originalText: text
-            };
-        }
-        
-        // 預設為新增代辦（如果包含代辦關鍵字）
-        if (keywords.addTodo.some(keyword => lowerText.includes(keyword))) {
-            return {
-                action: 'add',
-                title: text,
-                originalText: text
-            };
-        }
-        
-        return {
-            action: 'unknown',
-            originalText: text
-        };
-    }
-
-    // 處理新增代辦
-    async handleAddTodo(userId, commandInfo, language) {
-        try {
-            if (!commandInfo.title || commandInfo.title.trim().length === 0) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: TODO_MESSAGES[language].titleRequired,
-                    quickReply: {
-                        items: QUICK_REPLY_BUTTONS[language]
-                    }
-                });
-            }
-
-            const result = await this.todoService.addTodo(userId, commandInfo.title, {
-                priority: commandInfo.priority,
-                language: language
-            });
-
-            if (result.success) {
-                const flexMessage = this.createTodoFlexMessage(result.todo, language);
-                
-                return await this.sendMessage(userId, {
-                    type: 'flex',
-                    altText: result.message,
-                    contents: flexMessage,
-                    quickReply: {
-                        items: QUICK_REPLY_BUTTONS[language]
-                    }
-                });
-            } else {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: `❌ ${result.error}`,
-                    quickReply: {
-                        items: QUICK_REPLY_BUTTONS[language]
-                    }
-                });
-            }
-        } catch (error) {
-            console.error('Error in handleAddTodo:', error);
-            return await this.sendErrorMessage(userId, error.message);
-        }
-    }
-
-    // 處理查看代辦列表
-    async handleListTodos(userId, commandInfo, language) {
-        try {
-            const filter = commandInfo.filter || {};
-            const result = await this.todoService.getTodosByUser(userId, filter);
-
-            if (!result.success) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: `❌ ${result.error}`
-                });
-            }
-
-            if (result.todos.length === 0) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: TODO_MESSAGES[language].noTodos,
-                    quickReply: {
-                        items: QUICK_REPLY_BUTTONS[language]
-                    }
-                });
-            }
-
-            // 創建 Flex Carousel
-            const carouselContents = result.todos.slice(0, 10).map(todo => 
-                this.createTodoFlexBubble(todo, language)
-            );
-
-            const flexMessage = {
-                type: 'carousel',
-                contents: carouselContents
-            };
-
-            const altText = language === 'ja' ? 
-                `📋 タスクリスト (${result.count}件)` : 
-                `📋 代辦列表 (${result.count}項)`;
-
-            return await this.sendMessage(userId, {
-                type: 'flex',
-                altText: altText,
-                contents: flexMessage,
-                quickReply: {
-                    items: QUICK_REPLY_BUTTONS[language]
-                }
-            });
-        } catch (error) {
-            console.error('Error in handleListTodos:', error);
-            return await this.sendErrorMessage(userId, error.message);
-        }
-    }
-
-    // 處理完成代辦
-    async handleCompleteTodo(userId, commandInfo, language) {
-        try {
-            if (!commandInfo.todoId) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: TODO_MESSAGES[language].invalidCommand,
-                    quickReply: {
-                        items: QUICK_REPLY_BUTTONS[language]
-                    }
-                });
-            }
-
-            const result = await this.todoService.completeTodo(userId, commandInfo.todoId);
-
-            if (result.success) {
-                const flexMessage = this.createTodoFlexMessage(result.todo, language, true);
-                
-                return await this.sendMessage(userId, {
-                    type: 'flex',
-                    altText: result.message,
-                    contents: flexMessage,
-                    quickReply: {
-                        items: QUICK_REPLY_BUTTONS[language]
-                    }
-                });
-            } else {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: result.error === 'Todo not found' ? 
-                        TODO_MESSAGES[language].todoNotFound : 
-                        `❌ ${result.error}`
-                });
-            }
-        } catch (error) {
-            console.error('Error in handleCompleteTodo:', error);
-            return await this.sendErrorMessage(userId, error.message);
-        }
-    }
-
-    // 處理刪除代辦
-    async handleDeleteTodo(userId, commandInfo, language) {
-        try {
-            if (!commandInfo.todoId) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: TODO_MESSAGES[language].invalidCommand
-                });
-            }
-
-            const result = await this.todoService.deleteTodo(userId, commandInfo.todoId);
-
-            if (result.success) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: result.message,
-                    quickReply: {
-                        items: QUICK_REPLY_BUTTONS[language]
-                    }
-                });
-            } else {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: result.error === 'Todo not found' ? 
-                        TODO_MESSAGES[language].todoNotFound : 
-                        `❌ ${result.error}`
-                });
-            }
-        } catch (error) {
-            console.error('Error in handleDeleteTodo:', error);
-            return await this.sendErrorMessage(userId, error.message);
-        }
-    }
-
-    // 處理搜尋代辦
-    async handleSearchTodos(userId, commandInfo, language) {
-        try {
-            if (!commandInfo.searchTerm) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: TODO_MESSAGES[language].invalidCommand
-                });
-            }
-
-            const result = await this.todoService.searchTodos(userId, commandInfo.searchTerm);
-
-            if (!result.success) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: `❌ ${result.error}`
-                });
-            }
-
-            if (result.todos.length === 0) {
-                const noResultText = language === 'ja' ? 
-                    `🔍 "${commandInfo.searchTerm}" の検索結果が見つかりませんでした` :
-                    `🔍 找不到包含「${commandInfo.searchTerm}」的代辦事項`;
-                    
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: noResultText,
-                    quickReply: {
-                        items: QUICK_REPLY_BUTTONS[language]
-                    }
-                });
-            }
-
-            // 創建搜尋結果 Flex Message
-            const carouselContents = result.todos.slice(0, 10).map(todo => 
-                this.createTodoFlexBubble(todo, language)
-            );
-
-            const flexMessage = {
-                type: 'carousel',
-                contents: carouselContents
-            };
-
-            const altText = language === 'ja' ? 
-                `🔍 検索結果 (${result.count}件)` : 
-                `🔍 搜尋結果 (${result.count}項)`;
-
-            return await this.sendMessage(userId, {
-                type: 'flex',
-                altText: altText,
-                contents: flexMessage,
-                quickReply: {
-                    items: QUICK_REPLY_BUTTONS[language]
-                }
-            });
-        } catch (error) {
-            console.error('Error in handleSearchTodos:', error);
-            return await this.sendErrorMessage(userId, error.message);
-        }
-    }
-
-    // 處理統計資訊
-    async handleGetStats(userId, language) {
-        try {
-            const result = await this.todoService.getStats(userId);
-
-            if (!result.success) {
-                return await this.sendMessage(userId, {
-                    type: 'text',
-                    text: `❌ ${result.error}`
-                });
-            }
-
-            const stats = result.stats;
-            const completionRate = stats.total > 0 ? 
-                Math.round((stats.completed / stats.total) * 100) : 0;
-
-            const statsMessage = language === 'ja' ? 
-                `📊 タスク統計\n\n` +
-                `📝 総数: ${stats.total}\n` +
-                `✅ 完了: ${stats.completed}\n` +
-                `⏳ 未完了: ${stats.pending}\n` +
-                `🔔 リマインダー付き: ${stats.withReminders}\n` +
-                `📈 完了率: ${completionRate}%\n\n` +
-                `📌 優先度別:\n` +
-                `🔴 高: ${stats.byPriority.high}\n` +
-                `🟡 中: ${stats.byPriority.medium}\n` +
-                `🟢 低: ${stats.byPriority.low}` :
-                
-                `📊 代辦統計\n\n` +
-                `📝 總數: ${stats.total}\n` +
-                `✅ 已完成: ${stats.completed}\n` +
-                `⏳ 待辦: ${stats.pending}\n` +
-                `🔔 有提醒: ${stats.withReminders}\n` +
-                `📈 完成率: ${completionRate}%\n\n` +
-                `📌 優先級分佈:\n` +
-                `🔴 高: ${stats.byPriority.high}\n` +
-                `🟡 中: ${stats.byPriority.medium}\n` +
-                `🟢 低: ${stats.byPriority.low}`;
-
-            return await this.sendMessage(userId, {
-                type: 'text',
-                text: statsMessage,
-                quickReply: {
-                    items: QUICK_REPLY_BUTTONS[language]
-                }
-            });
-        } catch (error) {
-            console.error('Error in handleGetStats:', error);
-            return await this.sendErrorMessage(userId, error.message);
-        }
-    }
-
-    // 處理說明
-    async handleHelp(userId, language) {
-        try {
-            const helpMessage = TODO_MESSAGES[language].help;
-            const commandList = helpMessage.commands.join('\n');
-            
-            const fullHelpText = `${helpMessage.title}\n\n${commandList}`;
-
-            return await this.sendMessage(userId, {
-                type: 'text',
-                text: fullHelpText,
-                quickReply: {
-                    items: QUICK_REPLY_BUTTONS[language]
-                }
-            });
-        } catch (error) {
-            console.error('Error in handleHelp:', error);
-            return await this.sendErrorMessage(userId, error.message);
-        }
-    }
-
-    // 處理未知指令
-    async handleUnknownCommand(userId, language) {
-        return await this.sendMessage(userId, {
-            type: 'text',
-            text: TODO_MESSAGES[language].invalidCommand,
-            quickReply: {
-                items: QUICK_REPLY_BUTTONS[language]
-            }
-        });
-    }
-
-    // 創建代辦事項 Flex Message
-    createTodoFlexMessage(todo, language, showCompleted = false) {
-        return {
-            type: 'bubble',
-            header: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [
-                    {
-                        type: 'text',
-                        text: showCompleted ? '🎉 任務完成！' : '📝 代辦事項',
-                        weight: 'bold',
-                        size: 'md',
-                        color: showCompleted ? '#00C851' : '#1DB446'
-                    }
-                ]
-            },
-            body: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [
-                    {
-                        type: 'text',
-                        text: todo.title,
-                        weight: 'bold',
-                        size: 'lg',
-                        wrap: true
-                    },
-                    {
-                        type: 'separator',
-                        margin: 'md'
-                    },
-                    {
-                        type: 'box',
-                        layout: 'vertical',
-                        margin: 'md',
-                        spacing: 'sm',
-                        contents: [
-                            {
-                                type: 'box',
-                                layout: 'baseline',
-                                spacing: 'sm',
-                                contents: [
-                                    {
-                                        type: 'text',
-                                        text: language === 'ja' ? 'ID:' : 'ID:',
-                                        color: '#aaaaaa',
-                                        size: 'sm',
-                                        flex: 2
-                                    },
-                                    {
-                                        type: 'text',
-                                        text: todo.id.split('_')[1] || todo.id.substring(0, 8),
-                                        wrap: true,
-                                        size: 'sm',
-                                        flex: 3
-                                    }
-                                ]
-                            },
-                            {
-                                type: 'box',
-                                layout: 'baseline',
-                                spacing: 'sm',
-                                contents: [
-                                    {
-                                        type: 'text',
-                                        text: language === 'ja' ? '優先度:' : '優先級:',
-                                        color: '#aaaaaa',
-                                        size: 'sm',
-                                        flex: 2
-                                    },
-                                    {
-                                        type: 'text',
-                                        text: TODO_MESSAGES[language].priority[todo.priority],
-                                        wrap: true,
-                                        size: 'sm',
-                                        color: this.getPriorityColor(todo.priority),
-                                        flex: 3
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
-        };
-    }
-
-    // 創建代辦事項 Flex Bubble（用於列表）
-    createTodoFlexBubble(todo, language) {
-        const statusIcon = todo.completed ? '✅' : '⏳';
-        const priorityColor = this.getPriorityColor(todo.priority);
-        const shortId = todo.id.split('_')[1] || todo.id.substring(0, 8);
-
-        return {
-            type: 'bubble',
-            size: 'micro',
-            header: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [
-                    {
-                        type: 'text',
-                        text: `${statusIcon} ${todo.title}`,
-                        weight: 'bold',
-                        size: 'sm',
-                        wrap: true,
-                        maxLines: 2
-                    }
-                ],
-                backgroundColor: todo.completed ? '#f8f9fa' : '#ffffff'
-            },
-            body: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [
-                    {
-                        type: 'box',
-                        layout: 'baseline',
-                        contents: [
-                            {
-                                type: 'text',
-                                text: 'ID:',
-                                color: '#aaaaaa',
-                                size: 'xs',
-                                flex: 1
-                            },
-                            {
-                                type: 'text',
-                                text: shortId,
-                                size: 'xs',
-                                flex: 2
-                            }
-                        ]
-                    },
-                    {
-                        type: 'box',
-                        layout: 'baseline',
-                        margin: 'sm',
-                        contents: [
-                            {
-                                type: 'text',
-                                text: language === 'ja' ? '優先:' : '優先:',
-                                color: '#aaaaaa',
-                                size: 'xs',
-                                flex: 1
-                            },
-                            {
-                                type: 'text',
-                                text: TODO_MESSAGES[language].priority[todo.priority],
-                                size: 'xs',
-                                color: priorityColor,
-                                flex: 2
-                            }
-                        ]
-                    }
-                ]
-            },
-            footer: {
-                type: 'box',
-                layout: 'vertical',
-                contents: [
-                    {
-                        type: 'button',
-                        style: todo.completed ? 'secondary' : 'primary',
-                        height: 'sm',
-                        action: {
-                            type: 'message',
-                            label: todo.completed ? 
-                                (language === 'ja' ? '完了済み' : '已完成') :
-                                (language === 'ja' ? '完了' : '完成'),
-                            text: todo.completed ? 
-                                `查看 ${shortId}` : 
-                                `完成 ${shortId}`
-                        }
-                    }
-                ]
-            }
-        };
-    }
-
-    // 取得優先級顏色
-    getPriorityColor(priority) {
-        const colors = {
-            high: '#FF5551',
-            medium: '#FFA500',
-            low: '#00C851'
-        };
-        return colors[priority] || colors.medium;
-    }
-
-    // 發送訊息
-    async sendMessage(userId, message) {
-        try {
-            return await this.lineClient.replyMessage(userId, message);
-        } catch (error) {
-            console.error('Error sending message:', error);
-            throw error;
-        }
-    }
-
-    // 發送錯誤訊息
-    async sendErrorMessage(userId, errorMessage) {
-        return await this.sendMessage(userId, {
-            type: 'text',
-            text: `❌ 發生錯誤: ${errorMessage}`
-        });
-    }
-
-    // 輔助方法：提取代辦標題
-    extractTodoTitle(text, keywords) {
-        let title = text;
-        
-        // 移除指令關鍵字
-        keywords.forEach(keyword => {
-            const regex = new RegExp(keyword, 'gi');
-            title = title.replace(regex, '').trim();
-        });
-        
-        // 移除優先級關鍵字
-        title = title.replace(/[高中低]/g, '').trim();
-        
-        return title;
-    }
-
-    // 輔助方法：提取代辦 ID
-    extractTodoId(text) {
-        // 尋找數字或 ID 格式
-        const matches = text.match(/(\d+)|todo_(\d+)/);
-        return matches ? (matches[1] || matches[2]) : null;
-    }
-
-    // 輔助方法：提取優先級
-    extractPriority(text, language) {
-        const priorities = TODO_MESSAGES[language].priority;
-        
-        if (text.includes(priorities.high)) return 'high';
-        if (text.includes(priorities.medium)) return 'medium';
-        if (text.includes(priorities.low)) return 'low';
-        
-        return 'medium'; // 預設
-    }
-
-    // 輔助方法：提取列表篩選條件
-    extractListFilter(text, language) {
-        const filter = {};
-        
-        if (text.includes('已完成') || text.includes('完了')) {
-            filter.completed = true;
-        } else if (text.includes('待辦') || text.includes('未完了')) {
-            filter.completed = false;
-        }
-        
-        if (text.includes('高')) filter.priority = 'high';
-        if (text.includes('中')) filter.priority = 'medium';
-        if (text.includes('低')) filter.priority = 'low';
-        
-        return filter;
-    }
-
-    // 輔助方法：提取搜尋關鍵字
-    extractSearchTerm(text) {
-        // 移除搜尋指令關鍵字
-        let searchTerm = text
-            .replace(/搜尋|搜索|検索|search/gi, '')
-            .trim();
-            
-        return searchTerm;
-    }
+// 嘗試導入代辦功能模組（如果存在的話）
+let todoController = null;
+try {
+  todoController = require('./controllers/todoController');
+  console.log('✅ todoController 載入成功');
+} catch (error) {
+  console.log('⚠️ todoController 載入失敗:', error.message);
 }
 
-module.exports = TodoController;
+let todoMessages = null;
+try {
+  todoMessages = require('./constants/todoMessages');
+  console.log('✅ todoMessages 載入成功');
+} catch (error) {
+  console.log('⚠️ todoMessages 載入失敗:', error.message);
+}
+
+// 基本路由
+app.get('/', (req, res) => {
+  res.send('LINE Bot 運作中！代辦功能開發中...');
+});
+
+// Webhook 路由
+app.post('/webhook', line.middleware(config), (req, res) => {
+  console.log('=== 收到 Webhook 請求 ===');
+  console.log('請求時間:', new Date().toISOString());
+  
+  Promise
+    .all(req.body.events.map(handleEvent))
+    .then((result) => {
+      console.log('處理完成');
+      res.json(result);
+    })
+    .catch((err) => {
+      console.error('處理錯誤:', err);
+      res.status(500).end();
+    });
+});
+
+// 事件處理函數
+async function handleEvent(event) {
+  if (event.type !== 'message' || event.message?.type !== 'text') {
+    return Promise.resolve(null);
+  }
+
+  const userMessage = event.message.text.trim();
+  console.log('用戶訊息:', userMessage);
+
+  try {
+    let replyMessage = '';
+
+    // 測試指令
+    if (userMessage === '測試' || userMessage === 'test') {
+      replyMessage = '✅ LINE Bot 運作正常！\n代辦功能狀態:\n';
+      replyMessage += todoController ? '✅ todoController 已載入\n' : '❌ todoController 未載入\n';
+      replyMessage += todoMessages ? '✅ todoMessages 已載入' : '❌ todoMessages 未載入';
+    }
+    // 系統狀態檢查
+    else if (userMessage === '狀態' || userMessage === 'status') {
+      replyMessage = `🔧 系統狀態檢查：
+📁 檔案狀態:
+- todoController: ${todoController ? '✅ 已載入' : '❌ 未載入'}
+- todoMessages: ${todoMessages ? '✅ 已載入' : '❌ 未載入'}
+
+🕒 伺服器時間: ${new Date().toLocaleString('zh-TW', {timeZone: 'Asia/Taipei'})}`;
+    }
+    // 代辦功能 - 如果模組存在就使用，否則顯示錯誤訊息
+    else if (isTodoCommand(userMessage)) {
+      console.log('識別為代辦指令');
+      
+      if (todoController) {
+        try {
+          console.log('使用 todoController 處理');
+          return await todoController.handleCommand(event, userMessage);
+        } catch (error) {
+          console.error('todoController 處理錯誤:', error);
+          replyMessage = `❌ 代辦功能處理失敗：${error.message}`;
+        }
+      } else {
+        replyMessage = `❌ 代辦功能尚未完整載入
+缺少檔案：controllers/todoController.js
+請確認所有必要檔案都已部署`;
+      }
+    }
+    // 記帳功能（保持簡化版本）
+    else if (isAccountingCommand(userMessage)) {
+      replyMessage = `💰 記帳功能識別成功
+輸入內容：${userMessage}
+注意：完整記帳功能需要整合`;
+    }
+    // 幫助指令
+    else if (userMessage === 'help' || userMessage === '幫助') {
+      replyMessage = `📋 可用指令：
+
+🔧 系統指令：
+• 測試 - 測試連接狀態
+• 狀態 - 檢查系統狀態  
+• help - 顯示幫助
+
+📝 代辦指令：
+• 新增 [內容] - 新增代辦事項
+• 查看代辦 - 查看所有代辦
+• 完成 [編號] - 完成代辦事項
+• 刪除 [編號] - 刪除代辦事項
+
+💰 記帳指令：
+• 收入 [金額] [項目] - 記錄收入
+• 支出 [金額] [項目] - 記錄支出`;
+    }
+    // 預設回應
+    else {
+      replyMessage = `❓ 未識別的指令：${userMessage}
+
+請輸入 "help" 查看可用指令
+或輸入 "狀態" 檢查系統狀態`;
+    }
+
+    console.log('準備回覆:', replyMessage);
+
+    return client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: replyMessage
+    });
+
+  } catch (error) {
+    console.error('處理訊息時發生錯誤:', error);
+    return client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: `⚠️ 系統錯誤：${error.message}`
+    });
+  }
+}
+
+// 代辦指令檢測函數
+function isTodoCommand(message) {
+  const todoKeywords = [
+    // 中文關鍵字
+    '新增', '代辦', '提醒', '查看', '完成', '刪除', 
+    '待辦', 'todo', '任務', '事項',
+    // 日文關鍵字  
+    'タスク', '追加', '確認', '完了', '削除'
+  ];
+  
+  const isMatch = todoKeywords.some(keyword => message.includes(keyword));
+  console.log('代辦關鍵字檢測:', message, '結果:', isMatch);
+  return isMatch;
+}
+
+// 記帳指令檢測函數
+function isAccountingCommand(message) {
+  const accountingKeywords = ['收入', '支出', '花費', '賺', '買', '花', '付'];
+  
+  const isMatch = accountingKeywords.some(keyword => message.includes(keyword));
+  console.log('記帳關鍵字檢測:', message, '結果:', isMatch);
+  return isMatch;
+}
+
+// 錯誤處理
+app.use((err, req, res, next) => {
+  console.error('應用程式錯誤:', err);
+  if (err instanceof line.SignatureValidationFailed) {
+    res.status(401).send(err.signature);
+    return;
+  }
+  if (err instanceof line.JSONParseError) {
+    res.status(400).send(err.raw);
+    return;
+  }
+  next(err);
+});
+
+// 啟動伺服器
+app.listen(PORT, () => {
+  console.log(`=== LINE Bot 啟動成功 ===`);
+  console.log(`伺服器運行在 Port: ${PORT}`);
+  console.log(`時間: ${new Date().toISOString()}`);
+  
+  // 模組載入狀態
+  console.log('=== 模組載入狀態 ===');
+  console.log('todoController:', todoController ? '✅ 已載入' : '❌ 未載入');
+  console.log('todoMessages:', todoMessages ? '✅ 已載入' : '❌ 未載入');
+});
+
+// 全域錯誤處理
+process.on('uncaughtException', (err) => {
+  console.error('未捕獲的異常:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('未處理的 Promise 拒絕:', reason);
+});
