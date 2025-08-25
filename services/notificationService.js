@@ -1,154 +1,291 @@
-// services/notificationService.js
-const line = require('@line/bot-sdk');
-require('dotenv').config();
+// parsers/dateTimeParser.js - 修復版本
+const { LANGUAGES } = require('../constants/todoMessages');
 
-class NotificationService {
+class DateTimeParser {
     constructor() {
-        // 檢查環境變數
-        const channelAccessToken = process.env.CHANNEL_ACCESS_TOKEN;
-        const channelSecret = process.env.CHANNEL_SECRET;
-        
-        if (!channelAccessToken || !channelSecret) {
-            console.error('❌ 缺少 LINE Bot 環境變數:');
-            console.error('   CHANNEL_ACCESS_TOKEN:', channelAccessToken ? '✅ 已設定' : '❌ 未設定');
-            console.error('   CHANNEL_SECRET:', channelSecret ? '✅ 已設定' : '❌ 未設定');
+        this.timePatterns = {
+            zh: {
+                // 絕對時間
+                absolute: [
+                    /(\d{4})[年\-\/](\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2}):(\d{1,2})/,
+                    /(明天|明日)\s*(\d{1,2}):(\d{1,2})/,
+                    /(後天)\s*(\d{1,2}):(\d{1,2})/
+                ],
+                
+                // 相對時間
+                relative: [
+                    /(今天|今日)/,
+                    /(明天|明日)/,
+                    /(後天)/,
+                    /(\d+)\s*天後/,
+                    /(\d+)\s*小時後/,
+                    /(\d+)\s*分鐘後/,
+                    /(下週|下星期)/,
+                    /(下個月|下月)/
+                ],
+                
+                // 重複時間
+                recurring: [
+                    /每天\s*(\d{1,2}):(\d{1,2})/,
+                    /每週([一二三四五六日天])\s*(\d{1,2}):(\d{1,2})/,
+                    /每月(\d{1,2})號\s*(\d{1,2}):(\d{1,2})/,
+                    /每(\d+)天/,
+                    /每(\d+)週/,
+                    /每(\d+)個月/
+                ]
+            },
             
-            // 不要拋出錯誤，改為停用通知功能
-            this.enabled = false;
-            this.client = null;
-            return;
-        }
-        
-        // 建立 LINE Client
-        try {
-            const config = {
-                channelAccessToken,
-                channelSecret
-            };
-            
-            this.client = new line.Client(config);
-            this.enabled = true;
-            console.log('✅ LINE Bot 客戶端已初始化');
-            
-        } catch (error) {
-            console.error('❌ LINE Bot 客戶端初始化失敗:', error.message);
-            this.enabled = false;
-            this.client = null;
-        }
+            ja: {
+                // 絕対時間
+                absolute: [
+                    /(\d{4})[年\-\/](\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2}):(\d{1,2})/,
+                    /(明日|あした)\s*(\d{1,2}):(\d{1,2})/,
+                    /(あさって|明後日)\s*(\d{1,2}):(\d{1,2})/
+                ],
+                
+                // 相対時間
+                relative: [
+                    /(今日|きょう)/,
+                    /(明日|あした)/,
+                    /(明後日|あさって)/,
+                    /(\d+)\s*日後/,
+                    /(\d+)\s*時間後/,
+                    /(\d+)\s*分後/,
+                    /(来週|らいしゅう)/,
+                    /(来月|らいげつ)/
+                ],
+                
+                // 繰り返し時間
+                recurring: [
+                    /毎日\s*(\d{1,2}):(\d{1,2})/,
+                    /毎週([月火水木金土日])\s*(\d{1,2}):(\d{1,2})/,
+                    /毎月(\d{1,2})日\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d+)日ごと/,
+                    /(\d+)週間ごと/,
+                    /(\d+)ヶ月ごと/
+                ]
+            }
+        };
     }
     
-    // 檢查服務是否可用
-    isEnabled() {
-        return this.enabled;
-    }
-    
-    // 發送通知
-    async sendNotification(userId, message) {
-        if (!this.enabled) {
-            console.log('⚠️ 通知服務已停用，跳過發送通知');
-            return { success: false, reason: 'service_disabled' };
-        }
-        
+    // 解析時間字串
+    parseDateTime(text, language = 'zh') {
         try {
-            await this.client.pushMessage(userId, message);
-            console.log(`✅ 通知已發送給用戶: ${userId}`);
-            return { success: true };
-        } catch (error) {
-            console.error('❌ 發送通知失敗:', error.message);
-            return { success: false, error: error.message };
-        }
-    }
-    
-    // 回覆訊息
-    async replyMessage(replyToken, message) {
-        if (!this.enabled) {
-            console.log('⚠️ 通知服務已停用，跳過回覆訊息');
-            return { success: false, reason: 'service_disabled' };
-        }
-        
-        try {
-            await this.client.replyMessage(replyToken, message);
-            console.log('✅ 回覆訊息已發送');
-            return { success: true };
-        } catch (error) {
-            console.error('❌ 回覆訊息失敗:', error.message);
-            return { success: false, error: error.message };
-        }
-    }
-    
-    // 處理提醒操作
-    async handleReminderAction(userId, action, itemId) {
-        if (!this.enabled) {
-            return {
-                type: 'text',
-                text: '⚠️ 通知服務暫時無法使用'
-            };
-        }
-        
-        try {
-            let responseText = '';
+            const lang = language || 'zh';
+            const patterns = this.timePatterns[lang];
             
-            switch (action) {
-                case 'complete_reminder':
-                    responseText = '✅ 提醒已標記為完成';
-                    break;
-                case 'snooze_reminder':
-                    responseText = '⏰ 提醒已延遲5分鐘';
-                    break;
-                case 'acknowledge_reminder':
-                    responseText = '👌 提醒已確認';
-                    break;
-                default:
-                    responseText = '❓ 未知操作';
+            if (!patterns) {
+                console.warn(`不支援的語言: ${lang}`);
+                return null;
             }
             
-            return {
-                type: 'text',
-                text: responseText
-            };
+            // 嘗試解析絕對時間
+            let result = this.parseAbsoluteTime(text, patterns.absolute);
+            if (result) return result;
+            
+            // 嘗試解析相對時間
+            result = this.parseRelativeTime(text, patterns.relative);
+            if (result) return result;
+            
+            // 嘗試解析重複時間
+            result = this.parseRecurringTime(text, patterns.recurring);
+            if (result) return result;
+            
+            return null;
             
         } catch (error) {
-            console.error('處理提醒操作失敗:', error);
+            console.error('解析時間時發生錯誤:', error);
+            return null;
+        }
+    }
+    
+    // 解析絕對時間
+    parseAbsoluteTime(text, patterns) {
+        for (const pattern of patterns) {
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    return this.extractAbsoluteDateTime(match);
+                }
+            } catch (error) {
+                console.warn('絕對時間解析錯誤:', error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 解析相對時間
+    parseRelativeTime(text, patterns) {
+        for (const pattern of patterns) {
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    return this.extractRelativeDateTime(match, text);
+                }
+            } catch (error) {
+                console.warn('相對時間解析錯誤:', error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 解析重複時間
+    parseRecurringTime(text, patterns) {
+        for (const pattern of patterns) {
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    return this.extractRecurringDateTime(match, text);
+                }
+            } catch (error) {
+                console.warn('重複時間解析錯誤:', error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 提取絕對時間
+    extractAbsoluteDateTime(match) {
+        const now = new Date();
+        let year = now.getFullYear();
+        let month = now.getMonth() + 1;
+        let day = now.getDate();
+        let hour = 0;
+        let minute = 0;
+        
+        // 根據匹配結果解析
+        if (match.length >= 6) {
+            // 完整日期時間格式
+            year = parseInt(match[1]);
+            month = parseInt(match[2]);
+            day = parseInt(match[3]);
+            hour = parseInt(match[4]);
+            minute = parseInt(match[5]);
+        } else if (match.length >= 5) {
+            // 月日時間格式
+            month = parseInt(match[1]);
+            day = parseInt(match[2]);
+            hour = parseInt(match[3]);
+            minute = parseInt(match[4]);
+        } else if (match.length >= 3) {
+            // 只有時間格式
+            hour = parseInt(match[1]);
+            minute = parseInt(match[2]);
+        }
+        
+        const targetDate = new Date(year, month - 1, day, hour, minute);
+        
+        return {
+            type: 'absolute',
+            date: targetDate,
+            dateString: targetDate.toISOString(),
+            isValid: targetDate > now
+        };
+    }
+    
+    // 提取相對時間
+    extractRelativeDateTime(match, text) {
+        const now = new Date();
+        let targetDate = new Date(now);
+        
+        const timeMatch = text.match(/(\d{1,2}):(\d{1,2})/);
+        let hour = timeMatch ? parseInt(timeMatch[1]) : now.getHours();
+        let minute = timeMatch ? parseInt(timeMatch[2]) : now.getMinutes();
+        
+        if (match[1] === '今天' || match[1] === '今日') {
+            // 今天
+            targetDate.setHours(hour, minute, 0, 0);
+        } else if (match[1] === '明天' || match[1] === '明日') {
+            // 明天
+            targetDate.setDate(targetDate.getDate() + 1);
+            targetDate.setHours(hour, minute, 0, 0);
+        } else if (match[1] === '後天') {
+            // 後天
+            targetDate.setDate(targetDate.getDate() + 2);
+            targetDate.setHours(hour, minute, 0, 0);
+        } else if (match[1] && match[1].includes('天後')) {
+            // N天後
+            const days = parseInt(match[1]);
+            targetDate.setDate(targetDate.getDate() + days);
+            targetDate.setHours(hour, minute, 0, 0);
+        }
+        
+        return {
+            type: 'relative',
+            date: targetDate,
+            dateString: targetDate.toISOString(),
+            isValid: targetDate > now
+        };
+    }
+    
+    // 提取重複時間
+    extractRecurringDateTime(match, text) {
+        const now = new Date();
+        
+        if (match[0].includes('每天')) {
             return {
-                type: 'text',
-                text: '❌ 操作失敗，請稍後再試'
+                type: 'daily',
+                time: `${match[1]}:${match[2]}`,
+                hour: parseInt(match[1]),
+                minute: parseInt(match[2]),
+                isValid: true
+            };
+        } else if (match[0].includes('每週')) {
+            return {
+                type: 'weekly',
+                weekday: match[1],
+                time: `${match[2]}:${match[3]}`,
+                hour: parseInt(match[2]),
+                minute: parseInt(match[3]),
+                isValid: true
+            };
+        } else if (match[0].includes('每月')) {
+            return {
+                type: 'monthly',
+                day: parseInt(match[1]),
+                time: `${match[2]}:${match[3]}`,
+                hour: parseInt(match[2]),
+                minute: parseInt(match[3]),
+                isValid: true
             };
         }
+        
+        return null;
     }
     
-    // 發送每日摘要
-    async sendDailySummary(userId, summary) {
-        if (!this.enabled) {
-            console.log('⚠️ 通知服務已停用，跳過每日摘要');
-            return;
-        }
+    // 格式化時間顯示
+    formatDateTime(date, language = 'zh') {
+        if (!date) return '';
         
-        const message = {
-            type: 'text',
-            text: `📊 每日摘要\n\n${summary}`
+        const options = {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
         };
         
-        return this.sendNotification(userId, message);
+        const locale = language === 'ja' ? 'ja-JP' : 'zh-TW';
+        return date.toLocaleDateString(locale, options);
     }
     
-    // 發送週報
-    async sendWeeklyReport(userId, report) {
-        if (!this.enabled) {
-            console.log('⚠️ 通知服務已停用，跳過週報');
-            return;
-        }
+    // 檢查時間是否有效
+    isValidDateTime(dateTime) {
+        if (!dateTime) return false;
         
-        const message = {
-            type: 'text',
-            text: `📈 週報\n\n${report}`
-        };
+        const now = new Date();
+        const targetDate = new Date(dateTime);
         
-        return this.sendNotification(userId, message);
+        return targetDate instanceof Date && !isNaN(targetDate) && targetDate > now;
     }
 }
 
-// 創建單例實例
-const notificationService = new NotificationService();
-
-// 匯出實例（不要在這裡創建新的實例）
-module.exports = notificationService;
+module.exports = new DateTimeParser();
