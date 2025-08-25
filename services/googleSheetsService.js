@@ -14,9 +14,11 @@ class GoogleSheetsService {
 
   async initialize() {
     await this.doc.loadInfo();
+    console.log('Google Sheets 服務初始化完成');
   }
 
   // 你的其他 Google Sheets 操作方法...
 }
 
-module.exports = GoogleSheetsService;
+// 改成匯出實例
+module.exports = new GoogleSheetsService();
