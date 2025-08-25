@@ -934,15 +934,3 @@ app.get('/', (req, res) => {
     ]
   });
 });
-
-// 啟動伺服器
-app.listen(port, () => {
-  console.log(`LINE記帳機器人服務器運行在埠口 ${port}`);
-  console.log('✅ 記帳功能已修復：');
-  console.log('- 月度預算管理');
-  console.log('- 剩餘金額自動計算');
-  console.log('- 預算使用率監控');
-  console.log('- 每日可用金額顯示');
-  console.log('- 預算超支警告');
-  console.log('- 記帳後即時顯示剩餘預算');
-});
