@@ -1,3 +1,7 @@
+// 在 index.js 最上方加入
+console.log('🔍 環境變數檢查:');
+console.log('CHANNEL_ACCESS_TOKEN:', process.env.CHANNEL_ACCESS_TOKEN ? '✅ 已設定' : '❌ 未設定');
+console.log('CHANNEL_SECRET:', process.env.CHANNEL_SECRET ? '✅ 已設定' : '❌ 未設定');
 // 載入所有必要模組
 const express = require('express');
 const line = require('@line/bot-sdk');
