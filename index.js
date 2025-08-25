@@ -722,13 +722,13 @@ async function calculateBudgetRemaining(language = 'zh') {
       return {
         hasBudget: true,
         remaining: remaining,
-        message: `${statusIcon} 本月預算狀況\n` +
-                `💰 預算：${budget.toLocaleString('zh-TW')} 円\n` +
-                `💸 支出：${totalExpense.toLocaleString('zh-TW')} 円 (${usagePercentage}%)\n` +
-                `💵 剩餘：${remaining.toLocaleString('zh-TW')} 円\n` +
-                `📅 每日可用：${dailyAllowance.toLocaleString('zh-TW')} 円\n` +
-      };
-    }
+    message: `${statusIcon} 本月預算狀況\n` +
+             `💰 預算：${budget.toLocaleString('zh-TW')} 円\n` +
+             `💸 支出：${totalExpense.toLocaleString('zh-TW')} 円 (${usagePercentage}%)\n` +
+             `💵 剩餘：${remaining.toLocaleString('zh-TW')} 円\n` +
+             `📅 每日可用：${dailyAllowance.toLocaleString('zh-TW')} 円\n`
+  };
+
 
   } catch (error) {
     console.error('計算剩餘預算時發生錯誤:', error);
