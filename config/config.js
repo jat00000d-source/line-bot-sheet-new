@@ -414,6 +414,76 @@ class ReminderSheetService extends BaseSheetService {
   }
 
   /**
+   * 刪除提醒事項
+   */
+  async deleteReminder(userId, reminderId) {
+    await this.ensureInitialized();
+    
+    const rows = await this.sheet.getRows();
+    const reminderRow = rows.find(row => 
+      row.get('userId') === userId && row.get('id') === reminderId
+    );
+    
+    if (!reminderRow) {
+      throw new Error('提醒事項不存在');
+    }
+    
+    await reminderRow.delete();
+    return { id: reminderId, deleted: true };
+  }
+
+  /**
+   * 更新提醒狀態
+   */
+  async updateReminderStatus(userId, reminderId, status) {
+    await this.ensureInitialized();
+    
+    const rows = await this.sheet.getRows();
+    const reminderRow = rows.find(row => 
+      row.get('userId') === userId && row.get('id') === reminderId
+    );
+    
+    if (!reminderRow) {
+      throw new Error('提醒事項不存在');
+    }
+    
+    reminderRow.set('status', status);
+    if (status === 'triggered') {
+      reminderRow.set('lastTriggered', new Date().toISOString());
+    }
+    
+    await reminderRow.save();
+    return { id: reminderId, status };
+  }
+
+  /**
+   * 取得需要觸發的提醒
+   */
+  async getPendingReminders() {
+    await this.ensureInitialized();
+    
+    const rows = await this.sheet.getRows();
+    const now = new Date();
+    
+    const pendingReminders = rows.filter(row => {
+      if (row.get('status') !== 'active') return false;
+      
+      const reminderTime = new Date(row.get('reminderTime'));
+      return reminderTime <= now;
+    });
+    
+    return pendingReminders.map(row => ({
+      id: row.get('id'),
+      userId: row.get('userId'),
+      title: row.get('title'),
+      message: row.get('message'),
+      reminderTime: row.get('reminderTime'),
+      isRecurring: row.get('isRecurring') === 'true',
+      recurringPattern: row.get('recurringPattern')
+    }));
+  }
+
+  /**
    * 生成提醒事項ID
    */
   generateReminderId() {
