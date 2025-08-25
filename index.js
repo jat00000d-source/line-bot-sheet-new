@@ -738,9 +738,7 @@ async function calculateBudgetRemaining(language = 'zh') {
       '予算計算中にエラーが発生しました' : 
       '預算計算時發生錯誤'
   };
-}
   }
-}
 
 // 建立新的月份工作表
 async function createNewMonthSheet(doc, sheetName) {
