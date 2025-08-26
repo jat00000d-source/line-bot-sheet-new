@@ -1,44 +1,50 @@
 {
-  "name": "line-expense-bot",
-  "version": "1.0.0",
-  "description": "LINE記帳機器人 - 支援中日雙語和預算管理",
+  "name": "line-accounting-reminder-bot",
+  "version": "2.0.0",
+  "description": "LINE 記帳與提醒機器人 - 支援中日雙語，Google Sheets 整合",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test/test-parser.js",
+    "test-reminder": "node test/test-reminder.js",
+    "deploy": "git push heroku main",
+    "logs": "heroku logs --tail"
   },
   "keywords": [
-    "line",
-    "bot",
-    "expense",
-    "tracking",
-    "budget",
+    "line-bot",
+    "accounting",
+    "reminder",
     "google-sheets",
-    "multilingual"
+    "chinese",
+    "japanese",
+    "nodejs",
+    "express"
   ],
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "@line/bot-sdk": "^8.0.4",
+    "@line/bot-sdk": "^7.5.2",
     "express": "^4.18.2",
-    "google-spreadsheet": "^4.1.2",
-    "google-auth-library": "^9.4.1",
-    "dotenv": "^16.3.1"
+    "google-spreadsheet": "^3.3.0",
+    "google-auth-library": "^8.9.0",
+    "dotenv": "^16.3.1",
+    "node-cron": "^3.0.3",
+    "moment-timezone": "^0.5.43"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "node": ">=16.0.0",
+    "npm": ">=7.0.0"
   },
   "repository": {
     "type": "git",
-    "url": "your-repository-url"
+    "url": "https://github.com/yourusername/line-accounting-reminder-bot.git"
   },
   "bugs": {
-    "url": "your-repository-url/issues"
+    "url": "https://github.com/yourusername/line-accounting-reminder-bot/issues"
   },
-  "homepage": "your-repository-url#readme"
+  "homepage": "https://github.com/yourusername/line-accounting-reminder-bot#readme"
 }
