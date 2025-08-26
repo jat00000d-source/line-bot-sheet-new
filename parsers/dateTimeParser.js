@@ -288,4 +288,4 @@ class DateTimeParser {
     }
 }
 
-module.exports =  DateTimeParser();
+module.exports = DateTimeParser;
