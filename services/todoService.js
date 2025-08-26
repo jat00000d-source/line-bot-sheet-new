@@ -1,4 +1,33 @@
 const Todo = require('../models/Todo');
+
+// 臨時硬編碼配置
+const SHEET_CONFIG = {
+    todos: {
+        name: 'todos',
+        headers: [
+            'ID', 'UserID', 'Title', 'Description', 'Priority', 
+            'Tags', 'Location', 'Language', 'Completed', 
+            'HasReminder', 'ReminderTime', 'CreatedAt', 'UpdatedAt'
+        ]
+    }
+};
+
+const TODO_MESSAGES = {
+    zh: {
+        todoAdded: '待辦事項已新增！',
+        todoCompleted: '待辦事項已完成！',
+        todoUpdated: '待辦事項已更新！',
+        todoDeleted: '待辦事項已刪除！'
+    },
+    ja: {
+        todoAdded: 'ToDoを追加しました！',
+        todoCompleted: 'ToDoを完了しました！',
+        todoUpdated: 'ToDoを更新しました！',
+        todoDeleted: 'ToDoを削除しました！'
+    }
+};
+
+class TodoService {
 const { TODO_MESSAGES, SHEET_CONFIG } = require('../constants/todoMessage');
 
 class TodoService {
