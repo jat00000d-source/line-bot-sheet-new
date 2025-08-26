@@ -1,4 +1,4 @@
-// index.js - 修復版（專注記帳功能）
+// index.js - 修復版（專注記帳功能）- 括號已修正
 const express = require('express');
 const line = require('@line/bot-sdk');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
@@ -717,28 +717,30 @@ async function calculateBudgetRemaining(language = 'zh') {
                 `💵 残り：${remaining.toLocaleString('ja-JP')}円\n` +
                 `📅 1日使用可能：${dailyAllowance.toLocaleString('ja-JP')}円\n` +
                 `📊 記録数：${expenseCount}件${warningMessage}`
-       };
-} else {
-  return {
-    hasBudget: true,
-    remaining: remaining,
-    message: `${statusIcon} 本月預算狀況\n` +
-             `💰 預算：${budget.toLocaleString('zh-TW')} 円\n` +
-             `💸 支出：${totalExpense.toLocaleString('zh-TW')} 円 (${usagePercentage}%)\n` +
-             `💵 剩餘：${remaining.toLocaleString('zh-TW')} 円\n` +
-             `📅 每日可用：${dailyAllowance.toLocaleString('zh-TW')} 円\n`
-  };
-}
+      };
+    } else {
+      return {
+        hasBudget: true,
+        remaining: remaining,
+        message: `${statusIcon} 本月預算狀況\n` +
+                 `💰 預算：${budget.toLocaleString('zh-TW')} 円\n` +
+                 `💸 支出：${totalExpense.toLocaleString('zh-TW')} 円 (${usagePercentage}%)\n` +
+                 `💵 剩餘：${remaining.toLocaleString('zh-TW')} 円\n` +
+                 `📅 每日可用：${dailyAllowance.toLocaleString('zh-TW')} 円\n` +
+                 `📊 記錄筆數：${expenseCount} 筆${warningMessage}`
+      };
+    }
 
-} catch (error) {
-  console.error('計算剩餘預算時發生錯誤:', error);
-  return {
-    hasBudget: false,
-    message: language === 'ja' ? 
-      '予算計算中にエラーが発生しました' : 
-      '預算計算時發生錯誤'
-  };
+  } catch (error) {
+    console.error('計算剩餘預算時發生錯誤:', error);
+    return {
+      hasBudget: false,
+      message: language === 'ja' ? 
+        '予算計算中にエラーが発生しました' : 
+        '預算計算時發生錯誤'
+    };
   }
+}
 
 // 建立新的月份工作表
 async function createNewMonthSheet(doc, sheetName) {
@@ -915,7 +917,14 @@ function getHelpMessage(language = 'zh') {
   }
 }
 
-// 健康檢查路由の終了
+// 健康檢查路由
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    message: 'LINE記帳機器人運行正常'
+  });
+});
 
 // 伺服器啟動
 app.listen(port, () => {
@@ -927,4 +936,5 @@ app.listen(port, () => {
   console.log('- 每日可用金額顯示');
   console.log('- 預算超支警告');
   console.log('- 記帳後即時顯示剩餘預算');
+  console.log('- 括號語法錯誤已修正');
 });
