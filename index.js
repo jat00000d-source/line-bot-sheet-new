@@ -26,8 +26,8 @@ class LineBotApp {
     
     // LINE Bot 配置
     this.config = {
-      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-      channelSecret: process.env.LINE_CHANNEL_SECRET,
+      channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+      channelSecret: process.env.CHANNEL_SECRET,
     };
     
     this.client = new line.Client(this.config);
@@ -62,7 +62,7 @@ class LineBotApp {
         localTime: now.format('YYYY-MM-DD HH:mm:ss JST'),
         timezone: 'Asia/Tokyo',
         services: {
-          'expense-tracking': process.env.GOOGLE_SPREADSHEET_ID ? 'Connected' : 'Not configured',
+          'expense-tracking': process.env.GOOGLE_SHEET_ID ? 'Connected' : 'Not configured',
           'reminders': process.env.REMINDERS_SHEET_ID ? 'Connected' : 'Not configured'
         },
         environment: process.env.NODE_ENV || 'development'
@@ -183,7 +183,7 @@ class LineBotApp {
       console.log(`🚀 Server is running on port ${this.port}`);
       console.log(`🕐 Started at: ${startTime.format('YYYY-MM-DD HH:mm:ss JST')}`);
       console.log(`🌏 Timezone: Asia/Tokyo (JST, UTC+9)`);
-      console.log(`📊 Expense tracking: ${process.env.GOOGLE_SPREADSHEET_ID ? 'Connected ✅' : 'Not configured ❌'}`);
+      console.log(`📊 Expense tracking: ${process.env.GOOGLE_SHEET_ID ? 'Connected ✅' : 'Not configured ❌'}`);
       console.log(`⏰ Reminders: ${process.env.REMINDERS_SHEET_ID ? 'Connected ✅' : 'Not configured ❌'}`);
       console.log(`🔗 Health check: https://your-app.onrender.com/health`);
     });
