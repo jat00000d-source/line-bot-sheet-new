@@ -1,314 +1,251 @@
+// services/reminderService.js - 提醒服務
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
-const Reminder = require('../models/Reminder');
-const { REMINDER_MESSAGES } = require('../constants/todoMessages');
 
 class ReminderService {
-    constructor() {
-        this.doc = null;
-        this.reminderSheet = null;
-        this.initialized = false;
+  constructor() {
+    this.serviceAccountAuth = new JWT({
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+    
+    this.spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+    this.doc = null;
+    this.isConnected = false;
+  }
+
+  // 連接 Google Sheets
+  async connect() {
+    if (!this.isConnected) {
+      try {
+        this.doc = new GoogleSpreadsheet(this.spreadsheetId, this.serviceAccountAuth);
+        await this.doc.loadInfo();
+        this.isConnected = true;
+        console.log('✅ Google Sheets 連接成功');
+      } catch (error) {
+        console.error('❌ Google Sheets 連接失敗:', error);
+        throw error;
+      }
     }
+    return this.doc;
+  }
 
-    async initialize() {
-        if (this.initialized) return;
+  // 獲取或創建提醒工作表
+  async getReminderSheet() {
+    const doc = await this.connect();
+    
+    let sheet = doc.sheetsByTitle['Reminders'];
+    if (!sheet) {
+      console.log('創建 Reminders 工作表...');
+      sheet = await doc.addSheet({
+        title: 'Reminders',
+        headerValues: [
+          'id', 'title', 'description', 'type', 'datetime', 
+          'pattern', 'location', 'language', 'status', 
+          'created_at', 'next_trigger', 'user_id'
+        ]
+      });
+      
+      // 設定標題列格式
+      await this.formatReminderSheet(sheet);
+    }
+    
+    return sheet;
+  }
 
-        try {
-            const serviceAccountAuth = new JWT({
-                email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-                key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-                scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-            });
+  // 格式化提醒工作表
+  async formatReminderSheet(sheet) {
+    await sheet.loadCells('A1:L1');
+    
+    for (let i = 0; i < 12; i++) {
+      const cell = sheet.getCell(0, i);
+      cell.textFormat = { bold: true };
+      cell.backgroundColor = { red: 0.2, green: 0.6, blue: 0.86 };
+      cell.horizontalAlignment = 'CENTER';
+    }
+    
+    await sheet.saveUpdatedCells();
+  }
 
-            this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, serviceAccountAuth);
-            await this.doc.loadInfo();
+  // 生成唯一 ID
+  generateId() {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substr(2, 5);
+    return `R_${timestamp}_${random}`;
+  }
 
-            // 查找或創建 Reminders sheet
-            this.reminderSheet = this.doc.sheetsByTitle['Reminders'];
-            if (!this.reminderSheet) {
-                this.reminderSheet = await this.doc.addSheet({
-                    title: 'Reminders',
-                    headerValues: [
-                        'id', 'userId', 'title', 'description', 'reminderType',
-                        'scheduledTime', 'nextRun', 'frequency', 'weekdays',
-                        'monthDay', 'interval', 'location', 'isActive',
-                        'createdAt', 'updatedAt'
-                    ]
-                });
-            }
+  // 創建提醒
+  async createReminder(reminderData) {
+    try {
+      const sheet = await this.getReminderSheet();
+      
+      // 驗證必要欄位
+      if (!reminderData.title) {
+        return {
+          success: false,
+          error: reminderData.language === 'ja' ? 
+            'リマインダーのタイトルが必要です' : 
+            '提醒標題為必填欄位'
+        };
+      }
 
-            this.initialized = true;
-        } catch (error) {
-            console.error('初始化 ReminderService 失敗:', error);
-            throw error;
+      // 處理日期時間
+      const datetime = new Date(reminderData.datetime);
+      if (isNaN(datetime.getTime())) {
+        return {
+          success: false,
+          error: reminderData.language === 'ja' ? 
+            '無効な日時形式です' : 
+            '日期時間格式無效'
+        };
+      }
+
+      // 計算下次觸發時間
+      const nextTrigger = this.calculateNextTrigger(datetime, reminderData.type, reminderData.pattern);
+
+      const reminder = {
+        id: this.generateId(),
+        title: reminderData.title,
+        description: reminderData.description || '',
+        type: reminderData.type || 'once',
+        datetime: datetime.toISOString(),
+        pattern: reminderData.pattern || '',
+        location: reminderData.location || '',
+        language: reminderData.language || 'zh',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        next_trigger: nextTrigger.toISOString(),
+        user_id: reminderData.userId || 'default'
+      };
+
+      // 添加到工作表
+      await sheet.addRow(reminder);
+
+      console.log('✅ 提醒創建成功:', reminder.id);
+      return {
+        success: true,
+        reminder: reminder
+      };
+
+    } catch (error) {
+      console.error('創建提醒錯誤:', error);
+      return {
+        success: false,
+        error: reminderData.language === 'ja' ? 
+          'リマインダーの作成に失敗しました' : 
+          '創建提醒失敗'
+      };
+    }
+  }
+
+  // 計算下次觸發時間
+  calculateNextTrigger(datetime, type, pattern) {
+    const now = new Date();
+    const triggerTime = new Date(datetime);
+
+    switch (type) {
+      case 'once':
+        return triggerTime;
+        
+      case 'daily':
+        // 如果時間已過，設定為明天
+        if (triggerTime <= now) {
+          triggerTime.setDate(triggerTime.getDate() + 1);
         }
-    }
-
-    /**
-     * 創建新提醒
-     */
-    async createReminder(reminderData) {
-        await this.initialize();
-
-        try {
-            const reminder = new Reminder(reminderData);
-            
-            // 計算下次執行時間
-            reminder.calculateNextRun();
-
-            // 保存到 Google Sheets
-            await this.reminderSheet.addRow({
-                id: reminder.id,
-                userId: reminder.userId,
-                title: reminder.title,
-                description: reminder.description,
-                reminderType: reminder.reminderType,
-                scheduledTime: reminder.scheduledTime?.toISOString(),
-                nextRun: reminder.nextRun?.toISOString(),
-                frequency: reminder.frequency,
-                weekdays: JSON.stringify(reminder.weekdays),
-                monthDay: reminder.monthDay,
-                interval: reminder.interval,
-                location: reminder.location,
-                isActive: reminder.isActive,
-                createdAt: reminder.createdAt.toISOString(),
-                updatedAt: reminder.updatedAt.toISOString()
-            });
-
-            return reminder;
-        } catch (error) {
-            console.error('創建提醒失敗:', error);
-            throw error;
+        return triggerTime;
+        
+      case 'weekly':
+        // 設定為下一個指定的星期
+        const daysOfWeek = this.parseWeeklyPattern(pattern);
+        return this.getNextWeeklyTrigger(triggerTime, daysOfWeek);
+        
+      case 'monthly':
+        // 設定為下一個指定的日期
+        const daysOfMonth = this.parseMonthlyPattern(pattern);
+        return this.getNextMonthlyTrigger(triggerTime, daysOfMonth);
+        
+      case 'custom':
+        // 自定義間隔（以天為單位）
+        const intervalDays = parseInt(pattern) || 1;
+        if (triggerTime <= now) {
+          triggerTime.setDate(triggerTime.getDate() + intervalDays);
         }
+        return triggerTime;
+        
+      default:
+        return triggerTime;
     }
+  }
 
-    /**
-     * 獲取用戶的所有提醒
-     */
-    async getUserReminders(userId, language = 'zh') {
-        await this.initialize();
+  // 解析週間模式 (如: "1,3,5" 表示週一、三、五)
+  parseWeeklyPattern(pattern) {
+    if (!pattern) return [1]; // 預設週一
+    
+    return pattern.split(',')
+      .map(day => parseInt(day.trim()))
+      .filter(day => day >= 0 && day <= 6); // 0=週日, 1=週一, ...
+  }
 
-        try {
-            const rows = await this.reminderSheet.getRows();
-            const userReminders = rows
-                .filter(row => row.get('userId') === userId && row.get('isActive') === 'true')
-                .map(row => this.rowToReminder(row))
-                .sort((a, b) => new Date(a.nextRun) - new Date(b.nextRun));
+  // 解析月間模式 (如: "1,15" 表示每月1號和15號)
+  parseMonthlyPattern(pattern) {
+    if (!pattern) return [1]; // 預設每月1號
+    
+    return pattern.split(',')
+      .map(day => parseInt(day.trim()))
+      .filter(day => day >= 1 && day <= 31);
+  }
 
-            return userReminders;
-        } catch (error) {
-            console.error('獲取用戶提醒失敗:', error);
-            throw error;
-        }
+  // 獲取下一個週間觸發時間
+  getNextWeeklyTrigger(baseTime, daysOfWeek) {
+    const now = new Date();
+    const currentDay = now.getDay();
+    const triggerTime = new Date(baseTime);
+    
+    // 尋找下一個指定的星期幾
+    let nextDay = daysOfWeek.find(day => day > currentDay);
+    
+    if (!nextDay) {
+      // 如果本週沒有符合的日子，找下週的第一個
+      nextDay = Math.min(...daysOfWeek) + 7;
     }
+    
+    const daysToAdd = nextDay - currentDay;
+    triggerTime.setDate(now.getDate() + daysToAdd);
+    
+    return triggerTime;
+  }
 
-    /**
-     * 獲取需要執行的提醒
-     */
-    async getPendingReminders() {
-        await this.initialize();
-
-        try {
-            const rows = await this.reminderSheet.getRows();
-            const now = new Date();
-            
-            const pendingReminders = rows
-                .filter(row => {
-                    const isActive = row.get('isActive') === 'true';
-                    const nextRun = new Date(row.get('nextRun'));
-                    return isActive && nextRun <= now;
-                })
-                .map(row => this.rowToReminder(row));
-
-            return pendingReminders;
-        } catch (error) {
-            console.error('獲取待執行提醒失敗:', error);
-            throw error;
-        }
+  // 獲取下一個月間觸發時間
+  getNextMonthlyTrigger(baseTime, daysOfMonth) {
+    const now = new Date();
+    const currentDate = now.getDate();
+    const triggerTime = new Date(baseTime);
+    
+    // 尋找本月剩餘的符合日期
+    let nextDate = daysOfMonth.find(date => date > currentDate);
+    
+    if (nextDate) {
+      triggerTime.setDate(nextDate);
+    } else {
+      // 如果本月沒有符合的日期，設定為下個月的第一個指定日期
+      triggerTime.setMonth(triggerTime.getMonth() + 1);
+      triggerTime.setDate(Math.min(...daysOfMonth));
     }
+    
+    return triggerTime;
+  }
 
-    /**
-     * 更新提醒的下次執行時間
-     */
-    async updateReminderNextRun(reminderId) {
-        await this.initialize();
-
-        try {
-            const rows = await this.reminderSheet.getRows();
-            const reminderRow = rows.find(row => row.get('id') === reminderId);
-            
-            if (!reminderRow) {
-                throw new Error(`找不到提醒 ID: ${reminderId}`);
-            }
-
-            const reminder = this.rowToReminder(reminderRow);
-            
-            // 重新計算下次執行時間
-            reminder.calculateNextRun();
-            
-            // 如果是一次性提醒，則停用
-            if (reminder.reminderType === 'once') {
-                reminder.isActive = false;
-            }
-
-            // 更新資料
-            reminderRow.set('nextRun', reminder.nextRun?.toISOString() || '');
-            reminderRow.set('isActive', reminder.isActive);
-            reminderRow.set('updatedAt', new Date().toISOString());
-            
-            await reminderRow.save();
-
-            return reminder;
-        } catch (error) {
-            console.error('更新提醒執行時間失敗:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * 刪除提醒
-     */
-    async deleteReminder(userId, reminderId, language = 'zh') {
-        await this.initialize();
-
-        try {
-            const rows = await this.reminderSheet.getRows();
-            const reminderRow = rows.find(row => 
-                row.get('id') === reminderId && row.get('userId') === userId
-            );
-
-            if (!reminderRow) {
-                return {
-                    success: false,
-                    message: REMINDER_MESSAGES[language].REMINDER_NOT_FOUND
-                };
-            }
-
-            await reminderRow.delete();
-
-            return {
-                success: true,
-                message: REMINDER_MESSAGES[language].REMINDER_DELETED
-            };
-        } catch (error) {
-            console.error('刪除提醒失敗:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * 切換提醒狀態（啟用/停用）
-     */
-    async toggleReminderStatus(userId, reminderId, language = 'zh') {
-        await this.initialize();
-
-        try {
-            const rows = await this.reminderSheet.getRows();
-            const reminderRow = rows.find(row => 
-                row.get('id') === reminderId && row.get('userId') === userId
-            );
-
-            if (!reminderRow) {
-                return {
-                    success: false,
-                    message: REMINDER_MESSAGES[language].REMINDER_NOT_FOUND
-                };
-            }
-
-            const currentStatus = reminderRow.get('isActive') === 'true';
-            const newStatus = !currentStatus;
-
-            reminderRow.set('isActive', newStatus);
-            reminderRow.set('updatedAt', new Date().toISOString());
-            await reminderRow.save();
-
-            return {
-                success: true,
-                message: newStatus ? 
-                    REMINDER_MESSAGES[language].REMINDER_ACTIVATED : 
-                    REMINDER_MESSAGES[language].REMINDER_DEACTIVATED,
-                isActive: newStatus
-            };
-        } catch (error) {
-            console.error('切換提醒狀態失敗:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * 搜索提醒
-     */
-    async searchReminders(userId, keyword, language = 'zh') {
-        await this.initialize();
-
-        try {
-            const userReminders = await this.getUserReminders(userId, language);
-            const filteredReminders = userReminders.filter(reminder => 
-                reminder.title.toLowerCase().includes(keyword.toLowerCase()) ||
-                reminder.description.toLowerCase().includes(keyword.toLowerCase())
-            );
-
-            return filteredReminders;
-        } catch (error) {
-            console.error('搜索提醒失敗:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * 獲取提醒統計
-     */
-    async getReminderStats(userId, language = 'zh') {
-        await this.initialize();
-
-        try {
-            const reminders = await this.getUserReminders(userId, language);
-            
-            const stats = {
-                total: reminders.length,
-                active: reminders.filter(r => r.isActive).length,
-                inactive: reminders.filter(r => !r.isActive).length,
-                byType: {
-                    once: reminders.filter(r => r.reminderType === 'once').length,
-                    daily: reminders.filter(r => r.reminderType === 'daily').length,
-                    weekly: reminders.filter(r => r.reminderType === 'weekly').length,
-                    monthly: reminders.filter(r => r.reminderType === 'monthly').length,
-                    custom: reminders.filter(r => r.reminderType === 'custom').length
-                },
-                upcoming: reminders
-                    .filter(r => r.isActive && new Date(r.nextRun) > new Date())
-                    .slice(0, 5)
-            };
-
-            return stats;
-        } catch (error) {
-            console.error('獲取提醒統計失敗:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * 將 Google Sheets 行轉換為 Reminder 物件
-     */
-    rowToReminder(row) {
-        return new Reminder({
-            id: row.get('id'),
-            userId: row.get('userId'),
-            title: row.get('title'),
-            description: row.get('description'),
-            reminderType: row.get('reminderType'),
-            scheduledTime: row.get('scheduledTime') ? new Date(row.get('scheduledTime')) : null,
-            nextRun: row.get('nextRun') ? new Date(row.get('nextRun')) : null,
-            frequency: row.get('frequency'),
-            weekdays: row.get('weekdays') ? JSON.parse(row.get('weekdays')) : [],
-            monthDay: row.get('monthDay') ? parseInt(row.get('monthDay')) : null,
-            interval: row.get('interval') ? parseInt(row.get('interval')) : null,
-            location: row.get('location'),
-            isActive: row.get('isActive') === 'true',
-            createdAt: new Date(row.get('createdAt')),
-            updatedAt: new Date(row.get('updatedAt'))
-        });
-    }
-}
-
-module.exports = new ReminderService();
+  // 獲取活躍提醒列表
+  async getActiveReminders(userId = 'default') {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const activeReminders = rows
+        .filter(row => {
+          const status = row.get('status');
+          const userIdMatch = row.get('user_id') === userId;
+          return status === 'active' && userIdMatch;
+        })
+        .
