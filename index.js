@@ -1,313 +1,197 @@
-// index.js - 重構版本（保持記帳功能100%不變）
+require('dotenv').config();
 const express = require('express');
 const line = require('@line/bot-sdk');
-require('dotenv').config();
+const cron = require('node-cron');
+const moment = require('moment-timezone');
 
-const app = express();
-const port = process.env.PORT || 3000;
+// 設定默認時區為日本時間
+moment.tz.setDefault('Asia/Tokyo');
 
-// LINE Bot 設定
-const config = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.LINE_CHANNEL_SECRET,
-};
+// Controllers
+const ExpenseController = require('./controllers/expenseController');
+const TodoController = require('./controllers/todoController');
 
-const client = new line.Client(config);
+// Services
+const ReminderScheduler = require('./services/reminderScheduler');
+const NotificationService = require('./services/notificationService');
 
-// 動態載入控制器（容錯處理）
-let expenseController = null;
-let todoController = null;
+// Utils
+const CommandParser = require('./utils/commandParser');
+const LanguageDetector = require('./utils/languageDetector');
 
-try {
-  // 嘗試載入記帳控制器
-  const ExpenseController = require('./controllers/expenseController');
-  expenseController = new ExpenseController();
-  console.log('✅ 記帳控制器載入成功');
-} catch (error) {
-  console.log('⚠️ 記帳控制器載入失敗，使用內建功能');
-  // 如果載入失敗，使用原本的記帳邏輯作為後備
-}
-
-try {
-  // 嘗試載入代辦控制器
-  const TodoController = require('./controllers/todoController');
-  todoController = new TodoController();
-  console.log('✅ 代辦控制器載入成功');
-} catch (error) {
-  console.log('⚠️ 代辦控制器載入失敗，功能暫時不可用');
-}
-
-// 後備記帳功能（從原本的 index.js 複製的核心邏輯）
-const fallbackExpenseLogic = require('./fallback/expenseLogic');
-
-// 處理 LINE Webhook
-app.post('/webhook', line.middleware(config), (req, res) => {
-  Promise
-    .all(req.body.events.map(handleEvent))
-    .then((result) => res.json(result))
-    .catch((err) => {
-      console.error('處理事件時發生錯誤:', err);
-      res.status(500).end();
-    });
-});
-
-// 主要事件處理函數
-async function handleEvent(event) {
-  if (event.type !== 'message' || event.message.type !== 'text') {
-    return Promise.resolve(null);
-  }
-
-  const messageText = event.message.text.trim();
-  
-  try {
-    // 指令類型檢測
-    const commandInfo = detectCommandType(messageText);
+class LineBotApp {
+  constructor() {
+    this.app = express();
+    this.port = process.env.PORT || 3000;
     
-    switch (commandInfo.type) {
-      case 'expense':
-        return await handleExpenseCommand(event, messageText, commandInfo);
-        
-      case 'todo':
-        return await handleTodoCommand(event, messageText, commandInfo);
-        
-      case 'system':
-        return await handleSystemCommand(event, messageText, commandInfo);
-        
-      default:
-        return await handleUnknownCommand(event, messageText, commandInfo);
-    }
+    // LINE Bot 配置
+    this.config = {
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+      channelSecret: process.env.LINE_CHANNEL_SECRET,
+    };
     
-  } catch (error) {
-    console.error('處理訊息時發生錯誤:', error);
-    const language = detectLanguage(messageText);
-    const errorMsg = language === 'ja' ? 
-      'システムエラーが発生しました。しばらく後にもう一度お試しください' : 
-      '系統發生錯誤，請稍後再試';
+    this.client = new line.Client(this.config);
     
-    return client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: errorMsg
-    });
+    // 初始化控制器
+    this.expenseController = new ExpenseController();
+    this.todoController = new TodoController();
+    
+    // 初始化服務
+    this.reminderScheduler = new ReminderScheduler(this.client);
+    this.notificationService = new NotificationService(this.client);
+    
+    // 初始化工具
+    this.commandParser = new CommandParser();
+    this.languageDetector = new LanguageDetector();
+    
+    this.setupMiddleware();
+    this.setupRoutes();
+    this.startScheduler();
   }
-}
 
-// 指令類型檢測
-function detectCommandType(message) {
-  const language = detectLanguage(message);
-  
-  // 記帳指令檢測（保持與原版完全一致）
-  const expenseKeywords = [
-    // 中文指令
-    '總結', '本月總結', '說明', '幫助', '設定預算', '預算', '查看預算', '剩餘',
-    // 日文指令
-    '集計', '合計', 'まとめ', '今月集計', '説明', 'ヘルプ', '助け', '予算設定', '予算', '残り', '残額'
-  ];
-  
-  // 代辦指令檢測
-  const todoKeywords = [
-    // 中文
-    '新增提醒', '代辦', '提醒', '查看提醒', '完成提醒', '刪除提醒', '待辦', 'todo', '任務',
-    // 日文
-    'リマインダー', '追加', 'タスク', '確認', '完了', '削除', 'タスク追加'
-  ];
-  
-  // 系統指令檢測
-  const systemKeywords = ['測試', 'test', '狀態', 'status', 'health', '健康檢查'];
-  
-  // 優先級：系統 > 記帳 > 代辦
-  if (systemKeywords.some(keyword => message.includes(keyword))) {
-    return { type: 'system', language };
-  }
-  
-  if (expenseKeywords.some(keyword => message.includes(keyword)) || 
-      isExpenseInput(message)) {
-    return { type: 'expense', language };
-  }
-  
-  if (todoKeywords.some(keyword => message.includes(keyword))) {
-    return { type: 'todo', language };
-  }
-  
-  // 預設判斷為記帳（保持原有行為）
-  return { type: 'expense', language };
-}
-
-// 處理記帳指令
-async function handleExpenseCommand(event, message, commandInfo) {
-  try {
-    // 優先使用新的控制器
-    if (expenseController) {
-      return await expenseController.handleCommand(event, message, commandInfo);
-    }
+  setupMiddleware() {
+    this.app.use(express.json());
+    this.app.use(express.urlencoded({ extended: true }));
     
-    // 後備：使用原本的邏輯
-    console.log('使用後備記帳邏輯');
-    return await fallbackExpenseLogic.handleEvent(event);
-    
-  } catch (error) {
-    console.error('記帳功能處理錯誤:', error);
-    // 降級到最基本的處理
-    return client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: commandInfo.language === 'ja' ? 
-        '記帳機能でエラーが発生しました' : 
-        '記帳功能發生錯誤'
-    });
-  }
-}
-
-// 處理代辦指令
-async function handleTodoCommand(event, message, commandInfo) {
-  try {
-    if (todoController) {
-      return await todoController.handleCommand(event, message, commandInfo);
-    } else {
-      // 代辦功能尚未可用的友好提示
-      const response = commandInfo.language === 'ja' ? 
-        '🚧 リマインダー機能は開発中です。\n近日中に利用可能になります。' :
-        '🚧 提醒功能開發中\n即將推出，敬請期待！';
-      
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: response
+    // 健康檢查端點
+    this.app.get('/health', (req, res) => {
+      const now = moment().tz('Asia/Tokyo');
+      res.status(200).json({ 
+        status: 'OK', 
+        timestamp: now.toISOString(),
+        localTime: now.format('YYYY-MM-DD HH:mm:ss JST'),
+        timezone: 'Asia/Tokyo',
+        services: {
+          'expense-tracking': process.env.GOOGLE_SPREADSHEET_ID ? 'Connected' : 'Not configured',
+          'reminders': process.env.REMINDERS_SHEET_ID ? 'Connected' : 'Not configured'
+        },
+        environment: process.env.NODE_ENV || 'development'
       });
+    });
+
+    // 根目錄端點
+    this.app.get('/', (req, res) => {
+      res.status(200).json({
+        message: 'LINE Bot 記帳提醒系統',
+        status: 'Running',
+        timezone: 'JST (UTC+9)'
+      });
+    });
+  }
+
+  setupRoutes() {
+    // LINE Webhook
+    this.app.post('/webhook', line.middleware(this.config), (req, res) => {
+      Promise
+        .all(req.body.events.map(this.handleEvent.bind(this)))
+        .then((result) => res.json(result))
+        .catch((err) => {
+          console.error('Webhook error:', err);
+          res.status(500).end();
+        });
+    });
+  }
+
+  async handleEvent(event) {
+    if (event.type !== 'message' || event.message.type !== 'text') {
+      return Promise.resolve(null);
     }
-  } catch (error) {
-    console.error('代辦功能處理錯誤:', error);
-    return client.replyMessage(event.replyToken, {
+
+    const userId = event.source.userId;
+    const messageText = event.message.text.trim();
+    
+    try {
+      // 檢測語言
+      const language = this.languageDetector.detect(messageText);
+      
+      // 解析指令
+      const command = this.commandParser.parse(messageText, language);
+      
+      let response;
+      
+      // 根據指令類型分發到對應的控制器
+      switch (command.type) {
+        case 'expense':
+          response = await this.expenseController.handleExpense(event, command);
+          break;
+        
+        case 'reminder':
+        case 'todo':
+          response = await this.todoController.handleTodo(event, command, language);
+          break;
+        
+        case 'query_reminders':
+          response = await this.todoController.handleQueryReminders(event, language);
+          break;
+        
+        case 'delete_reminder':
+          response = await this.todoController.handleDeleteReminder(event, command, language);
+          break;
+        
+        default:
+          response = await this.handleDefault(event, language);
+          break;
+      }
+
+      if (response) {
+        return this.client.replyMessage(event.replyToken, response);
+      }
+      
+    } catch (error) {
+      console.error('Handle event error:', error);
+      const errorMessage = {
+        type: 'text',
+        text: '處理訊息時發生錯誤，請稍後再試。'
+      };
+      return this.client.replyMessage(event.replyToken, errorMessage);
+    }
+  }
+
+  async handleDefault(event, language) {
+    const helpMessage = language === 'ja' ? 
+      'こんにちは！家計簿とリマインダー機能をご利用いただけます。\n\n📊 家計簿機能:\n「食費 500円 昼食」\n「交通費 200円」\n\n⏰ リマインダー機能:\n「明日8時に薬を飲む」\n「毎日19時に運動」\n「毎週月曜日に会議」\n\n📋 その他:\n「リマインダー一覧」\n「リマインダー削除 [番号]」' :
+      '您好！我是記帳和提醒助手。\n\n📊 記帳功能:\n「食物 50元 午餐」\n「交通 30元」\n\n⏰ 提醒功能:\n「明天8點吃藥」\n「每天晚上7點運動」\n「每週一開會」\n\n📋 其他功能:\n「查看提醒」\n「刪除提醒 [編號]」';
+    
+    return {
       type: 'text',
-      text: commandInfo.language === 'ja' ? 
-        'リマインダー機能でエラーが発生しました' : 
-        '提醒功能發生錯誤'
+      text: helpMessage
+    };
+  }
+
+  startScheduler() {
+    // 設定日本時間的 cron job，每分鐘檢查提醒
+    // 使用 Asia/Tokyo 時區
+    cron.schedule('* * * * *', async () => {
+      try {
+        const now = moment().tz('Asia/Tokyo');
+        console.log(`⏰ [${now.format('YYYY-MM-DD HH:mm:ss JST')}] Checking reminders...`);
+        await this.reminderScheduler.checkAndSendReminders();
+      } catch (error) {
+        console.error('Scheduler error:', error);
+      }
+    }, {
+      timezone: 'Asia/Tokyo'
+    });
+    
+    console.log('⏰ Reminder scheduler started (JST timezone)');
+    console.log(`🕐 Current JST time: ${moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')}`);
+  }
+
+  start() {
+    this.app.listen(this.port, () => {
+      const startTime = moment().tz('Asia/Tokyo');
+      console.log(`🚀 Server is running on port ${this.port}`);
+      console.log(`🕐 Started at: ${startTime.format('YYYY-MM-DD HH:mm:ss JST')}`);
+      console.log(`🌏 Timezone: Asia/Tokyo (JST, UTC+9)`);
+      console.log(`📊 Expense tracking: ${process.env.GOOGLE_SPREADSHEET_ID ? 'Connected ✅' : 'Not configured ❌'}`);
+      console.log(`⏰ Reminders: ${process.env.REMINDERS_SHEET_ID ? 'Connected ✅' : 'Not configured ❌'}`);
+      console.log(`🔗 Health check: https://your-app.onrender.com/health`);
     });
   }
 }
 
-// 處理系統指令
-async function handleSystemCommand(event, message, commandInfo) {
-  const language = commandInfo.language;
-  let response = '';
-  
-  if (message.includes('測試') || message.includes('test')) {
-    response = `✅ 系統運作正常！
-    
-🔧 模組狀態：
-• 記帳功能：${expenseController ? '✅ 已載入' : '⚠️ 使用後備邏輯'}  
-• 提醒功能：${todoController ? '✅ 已載入' : '🚧 開發中'}
+// 啟動應用程式
+const app = new LineBotApp();
+app.start();
 
-⏰ 服務時間：${new Date().toLocaleString('zh-TW', {timeZone: 'Asia/Taipei'})}`;
-  }
-  else if (message.includes('狀態') || message.includes('status')) {
-    response = `📊 詳細系統狀態：
-
-🏗️ 架構版本：v2.0 (模組化)
-📁 載入狀態：
-  └─ controllers/
-     ├─ expenseController: ${expenseController ? '✅' : '❌'}
-     └─ todoController: ${todoController ? '✅' : '❌'}
-  └─ services/
-     ├─ Google Sheets: ✅ 已連接
-     └─ 排程服務: ${process.env.CRON_ENABLED === 'true' ? '✅' : '⏸️ 暫停'}
-
-💾 存儲：Google Sheets
-🌐 語言：中文/日文
-🔄 狀態：運行中`;
-  }
-  
-  return client.replyMessage(event.replyToken, {
-    type: 'text',
-    text: response || '系統指令執行完成'
-  });
-}
-
-// 處理未知指令
-async function handleUnknownCommand(event, message, commandInfo) {
-  // 再次嘗試記帳功能（可能是自然語言輸入）
-  return await handleExpenseCommand(event, message, commandInfo);
-}
-
-// 語言檢測（保持與原版一致）
-function detectLanguage(message) {
-  const japaneseKeywords = ['集計', '合計', 'まとめ', '今月集計', '説明', 'ヘルプ', '助け',
-                           '昼食', 'ランチ', '夕食', '夜食', '朝食', 'コーヒー', '珈琲',
-                           '交通費', '電車', 'バス', 'タクシー', '買い物', 'ショッピング',
-                           '娯楽', '映画', 'ゲーム', '医療', '病院', '薬', '今日', '昨日', '一昨日',
-                           '予算設定', '予算', '残り', '残額'];
-  
-  const japaneseChars = /[\u3040-\u309F\u30A0-\u30FF]/;
-  
-  const hasJapaneseKeyword = japaneseKeywords.some(keyword => message.includes(keyword));
-  const hasJapaneseChars = japaneseChars.test(message);
-  
-  return (hasJapaneseKeyword || hasJapaneseChars) ? 'ja' : 'zh';
-}
-
-// 檢查是否為記帳輸入格式
-function isExpenseInput(text) {
-  // 檢查是否包含金額和項目的組合
-  const hasAmount = /\d+/.test(text);
-  const hasSpace = /[\s　]+/.test(text);
-  const parts = text.split(/[\s　]+/).filter(part => part.length > 0);
-  
-  return hasAmount && hasSpace && parts.length >= 2;
-}
-
-// 健康檢查路由
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    message: 'LINE機器人運行正常',
-    version: '2.0-modular',
-    modules: {
-      expense: expenseController ? 'loaded' : 'fallback',
-      todo: todoController ? 'loaded' : 'pending'
-    }
-  });
-});
-
-// 根路由
-app.get('/', (req, res) => {
-  res.send(`
-    <h1>LINE 記帳 & 提醒機器人</h1>
-    <p>狀態：運行中</p>
-    <p>版本：v2.0 模組化架構</p>
-    <p>時間：${new Date().toLocaleString('zh-TW', {timeZone: 'Asia/Taipei'})}</p>
-    
-    <h2>功能狀態</h2>
-    <ul>
-      <li>記帳功能：${expenseController ? '✅ 已載入' : '⚠️ 後備模式'}</li>
-      <li>提醒功能：${todoController ? '✅ 已載入' : '🚧 開發中'}</li>
-    </ul>
-    
-    <p><a href="/health">健康檢查 API</a></p>
-  `);
-});
-
-// 伺服器啟動
-app.listen(port, () => {
-  console.log(`=== LINE 機器人啟動成功 ===`);
-  console.log(`🚀 服務器運行在端口: ${port}`);
-  console.log(`📅 啟動時間: ${new Date().toISOString()}`);
-  console.log(`🏗️ 架構版本: v2.0 模組化`);
-  
-  console.log('\n=== 模組載入狀態 ===');
-  console.log(`💰 記帳功能: ${expenseController ? '✅ 已載入' : '⚠️ 後備模式'}`);
-  console.log(`📋 提醒功能: ${todoController ? '✅ 已載入' : '🚧 開發中'}`);
-  
-  console.log('\n=== 功能支援 ===');
-  console.log('✅ 中日雙語支援');
-  console.log('✅ Google Sheets 整合');
-  console.log('✅ 自然語言解析');
-  console.log('✅ 預算管理');
-  console.log('🚧 智慧提醒（開發中）');
-});
-
-// 全域錯誤處理
-process.on('uncaughtException', (err) => {
-  console.error('未捕獲的異常:', err);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('未處理的 Promise 拒絕:', reason);
-});
+module.exports = LineBotApp;
