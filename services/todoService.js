@@ -1,3 +1,4 @@
+// services/todoService.js
 const Todo = require('../models/Todo');
 
 // 臨時硬編碼配置
@@ -26,9 +27,6 @@ const TODO_MESSAGES = {
         todoDeleted: 'ToDoを削除しました！'
     }
 };
-
-class TodoService {
-const { TODO_MESSAGES, SHEET_CONFIG } = require('../constants/todoMessage');
 
 class TodoService {
     constructor(googleSheetsService) {
