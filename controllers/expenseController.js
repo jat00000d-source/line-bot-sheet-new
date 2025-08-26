@@ -1,13 +1,13 @@
 // controllers/expenseController.js (更新版)
 const ExpenseSheetService = require('../services/expenseService');
 const ExpenseParser = require('../parsers/expenseParser');
-const DateParser = require('../parsers/dateTimeParser');
+const DateTimeParser = require('../parsers/dateTimeParser');
 
 class ExpenseController {
   constructor() {
     this.expenseService = new ExpenseSheetService();
     this.expenseParser = new ExpenseParser();
-    this.dateParser = new DateParser();
+    this.dateParser = new DateTimeParser();
   }
 
   /**
@@ -98,18 +98,16 @@ class ExpenseController {
   }
 }
 
-module.exports = ExpenseController;
-
 // controllers/todoController.js (更新版)
-const TodoSheetService = require('../services/todoSheetService');
-const ReminderSheetService = require('../services/reminderSheetService');
-
+const TodoService = require('../services/todoService');
+const ReminderService = require('../services/reminderService');
+const DateTimeParser = require('../parsers/dateTimeParser');
 
 class TodoController {
   constructor() {
-    this.todoService = new TodoSheetService();
-    this.reminderService = new ReminderSheetService();
-    this.dateParser = new DateParser();
+    this.todoService = new TodoService();
+    this.reminderService = new ReminderService();
+    this.dateParser = new DateTimeParser();
   }
 
   /**
@@ -322,7 +320,6 @@ class TodoController {
    * 刪除提醒事項
    */
   async deleteReminder(parsedCommand) {
-    // 這個方法需要在 reminderSheetService 中實作
     const result = await this.reminderService.deleteReminder(
       parsedCommand.userId, 
       parsedCommand.reminderId
@@ -371,4 +368,4 @@ class TodoController {
   }
 }
 
-module.exports = TodoController
+module.exports = { ExpenseController, TodoController };
