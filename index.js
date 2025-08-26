@@ -104,7 +104,7 @@ class LineBotApp {
       const language = this.languageDetector.detect(messageText);
       
       // 解析指令
-      const command = this.commandParser.parse(messageText, language);
+      const command = this.commandParser.parseCommand(messageText, language);
       
       let response;
       
