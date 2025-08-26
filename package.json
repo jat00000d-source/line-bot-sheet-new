@@ -1,26 +1,44 @@
 {
-  "name": "line-bot-accounting",
+  "name": "line-expense-bot",
   "version": "1.0.0",
-  "description": "LINE Bot for accounting with Google Sheets",
+  "description": "LINE記帳機器人 - 支援中日雙語和預算管理",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "engines": {
-    "node": ">=16.0.0"
-  },
+  "keywords": [
+    "line",
+    "bot",
+    "expense",
+    "tracking",
+    "budget",
+    "google-sheets",
+    "multilingual"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
   "dependencies": {
-    "@line/bot-sdk": "^7.5.2",
+    "@line/bot-sdk": "^8.0.4",
     "express": "^4.18.2",
-    "googleapis": "^126.0.1",
+    "google-spreadsheet": "^4.1.2",
+    "google-auth-library": "^9.4.1",
     "dotenv": "^16.3.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.2"
   },
-  "keywords": ["line-bot", "accounting", "google-sheets"],
-  "author": "Your Name",
-  "license": "MIT"
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "your-repository-url"
+  },
+  "bugs": {
+    "url": "your-repository-url/issues"
+  },
+  "homepage": "your-repository-url#readme"
 }
