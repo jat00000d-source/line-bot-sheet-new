@@ -1,369 +1,302 @@
-// controllers/expenseController.js (更新版)
-const ExpenseSheetService = require('../services/expenseService');
-const ExpenseParser = require('../parsers/expenseParser');
-const DateTimeParser = require('../parsers/dateTimeParser');
+// controllers/expenseController.js (修復版)
+const moment = require('moment-timezone');
 
 class ExpenseController {
   constructor() {
-    this.expenseService = new ExpenseSheetService();
-    this.expenseParser = new ExpenseParser();
-    this.dateParser = new DateTimeParser();
+    // 使用記憶體儲存（你可以之後改成 Google Sheets）
+    this.expenses = [];
+    console.log('💰 ExpenseController 初始化完成');
   }
 
   /**
-   * 處理記帳相關指令
+   * 處理記帳相關訊息
    */
-  async handleExpense(parsedCommand) {
+  async handleExpense(event, command) {
     try {
-      switch (parsedCommand.commandType) {
-        case 'expense':
-          return await this.addExpense(parsedCommand);
-        case 'expense_summary':
-          return await this.getExpenseSummary(parsedCommand);
-        case 'set_budget':
-          return await this.setBudget(parsedCommand);
-        case 'budget':
-          return await this.getBudgetStatus(parsedCommand);
-        case 'remaining':
-          return await this.getRemainingBudget(parsedCommand);
-        default:
-          return '不支援的記帳指令';
-      }
+      console.log('💰 處理記帳指令:', command);
+      
+      const userId = event.source.userId;
+      const now = moment().tz('Asia/Tokyo');
+      
+      // 創建記帳記錄
+      const expense = {
+        id: Date.now(),
+        userId: userId,
+        category: command.category || '其他',
+        amount: command.amount,
+        description: command.description || '',
+        timestamp: now.toISOString(),
+        date: now.format('YYYY-MM-DD'),
+        time: now.format('HH:mm:ss')
+      };
+      
+      // 儲存記錄
+      this.expenses.push(expense);
+      
+      console.log('💾 記帳記錄已儲存:', expense);
+      
+      // 準備回應訊息
+      const responseText = `✅ 記帳成功！\n\n📊 類別: ${expense.category}\n💰 金額: ${expense.amount}元\n📝 描述: ${expense.description || '無'}\n🕐 時間: ${expense.date} ${expense.time}`;
+      
+      return {
+        type: 'text',
+        text: responseText
+      };
+      
     } catch (error) {
-      console.error('記帳處理錯誤:', error);
-      return '記帳處理失敗，請稍後再試';
+      console.error('❌ 記帳處理錯誤:', error);
+      return {
+        type: 'text',
+        text: '記帳時發生錯誤，請稍後再試。'
+      };
     }
   }
 
   /**
-   * 新增記帳記錄
+   * 處理記帳查詢
    */
-  async addExpense(parsedCommand) {
-    const expenseData = {
-      date: parsedCommand.date || new Date().toISOString().split('T')[0],
-      amount: parsedCommand.amount,
-      category: parsedCommand.category,
-      description: parsedCommand.description || '',
-      userId: parsedCommand.userId
-    };
+  async handleExpenseQuery(event, command, language) {
+    try {
+      const userId = event.source.userId;
+      const userExpenses = this.getUserExpenses(userId);
+      
+      if (userExpenses.length === 0) {
+        return {
+          type: 'text',
+          text: language === 'ja' ? '📊 支出記録がありません' : '📊 目前沒有支出記錄'
+        };
+      }
 
-    await this.expenseService.addExpense(expenseData);
-    
-    return `✅ 記帳成功！\n💰 金額: ${expenseData.amount} 元\n📁 分類: ${expenseData.category}\n📅 日期: ${expenseData.date}${expenseData.description ? `\n📝 備註: ${expenseData.description}` : ''}`;
+      // 計算今日支出
+      const todayTotal = this.getTodayTotal(userId);
+      const totalExpenses = userExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+
+      let response = language === 'ja' ? 
+        `📊 支出サマリー\n\n💰 今日の支出: ${todayTotal}円\n💰 総支出: ${totalExpenses}円\n📝 記録数: ${userExpenses.length}件\n\n` :
+        `📊 支出總覽\n\n💰 今日支出: ${todayTotal}元\n💰 總支出: ${totalExpenses}元\n📝 記錄數: ${userExpenses.length}筆\n\n`;
+
+      // 顯示最近5筆記錄
+      const recentExpenses = userExpenses.slice(0, 5);
+      response += language === 'ja' ? '📋 最近の記録:\n' : '📋 最近記錄:\n';
+      
+      recentExpenses.forEach((expense, index) => {
+        response += `${index + 1}. ${expense.category} ${expense.amount}${language === 'ja' ? '円' : '元'}`;
+        if (expense.description) {
+          response += ` (${expense.description})`;
+        }
+        response += `\n   ${expense.date} ${expense.time}\n`;
+      });
+
+      return {
+        type: 'text',
+        text: response
+      };
+
+    } catch (error) {
+      console.error('❌ 查詢記帳錯誤:', error);
+      return {
+        type: 'text',
+        text: '查詢支出時發生錯誤。'
+      };
+    }
   }
 
   /**
-   * 取得記帳摘要
+   * 取得使用者的記帳記錄
    */
-  async getExpenseSummary(parsedCommand) {
-    const startDate = parsedCommand.startDate;
-    const endDate = parsedCommand.endDate;
-    
-    const expenses = await this.expenseService.getUserExpenses(
-      parsedCommand.userId, 
-      startDate, 
-      endDate
-    );
-
-    if (expenses.length === 0) {
-      return '📊 查無記帳記錄';
-    }
-
-    const totalAmount = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-    const categoryTotals = expenses.reduce((acc, expense) => {
-      acc[expense.category] = (acc[expense.category] || 0) + expense.amount;
-      return acc;
-    }, {});
-
-    let summary = `📊 記帳摘要\n總支出: ${totalAmount} 元\n記錄數: ${expenses.length} 筆\n\n📁 分類支出:\n`;
-    
-    for (const [category, amount] of Object.entries(categoryTotals)) {
-      summary += `• ${category}: ${amount} 元\n`;
-    }
-
-    return summary;
+  getUserExpenses(userId, limit = 100) {
+    return this.expenses
+      .filter(expense => expense.userId === userId)
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(0, limit);
   }
 
-  // ... 其他記帳方法保持不變
+  /**
+   * 取得今日總支出
+   */
+  getTodayTotal(userId) {
+    const today = moment().tz('Asia/Tokyo').format('YYYY-MM-DD');
+    return this.expenses
+      .filter(expense => expense.userId === userId && expense.date === today)
+      .reduce((total, expense) => total + expense.amount, 0);
+  }
 
   /**
    * 取得幫助訊息
    */
-  getHelpMessage(language = 'zh-tw') {
+  getHelpMessage(language = 'zh') {
     if (language === 'ja') {
-      return `📚 家計簿機能ヘルプ\n\n💰 支出記録:\n• 金額 カテゴリ [説明]\n例: 150 食費 昼食\n\n📊 支出確認:\n• 今日の支出\n• 今週の支出\n• 今月の支出\n\n💳 予算管理:\n• 予算設定 金額\n例: 予算設定 30000`;
+      return `📚 家計簿機能ヘルプ\n\n💰 支出記録:\n• カテゴリ 金額 [メモ]\n例: 食費 500 昼食\n例: 150 交通費\n\n📊 支出確認:\n• 支出確認\n• 支出履歴`;
     }
     
-    return `📚 記帳功能說明\n\n💰 記帳格式:\n• 金額 分類 [備註]\n例: 150 午餐 便當\n\n📊 查詢支出:\n• 今日支出\n• 本週支出\n• 本月支出\n\n💳 預算管理:\n• 設定預算 金額\n例: 設定預算 30000`;
+    return `📚 記帳功能說明\n\n💰 記帳格式:\n• 類別 金額 [備註]\n例: 食物 150 午餐\n例: 50 交通費\n\n📊 查詢支出:\n• 查看支出\n• 支出記錄`;
   }
 }
 
-// controllers/todoController.js (更新版)
-const TodoService = require('../services/todoService');
-const ReminderService = require('../services/reminderService');
-
 class TodoController {
   constructor() {
-    this.todoService = new TodoService();
-    this.reminderService = new ReminderService();
-    this.dateParser = new DateTimeParser();
+    // 使用記憶體儲存
+    this.reminders = [];
+    console.log('⏰ TodoController 初始化完成');
   }
 
   /**
-   * 處理待辦相關指令
+   * 處理待辦/提醒訊息
    */
-  async handleTodo(parsedCommand) {
+  async handleTodo(event, command, language) {
     try {
-      switch (parsedCommand.commandType) {
-        case 'todo_add':
-          return await this.addTodo(parsedCommand);
-        case 'todo_list':
-          return await this.listTodos(parsedCommand);
-        case 'todo_complete':
-          return await this.completeTodo(parsedCommand);
-        case 'todo_delete':
-          return await this.deleteTodo(parsedCommand);
-        case 'reminder_add':
-          return await this.addReminder(parsedCommand);
-        case 'reminder_list':
-          return await this.listReminders(parsedCommand);
-        case 'reminder_delete':
-          return await this.deleteReminder(parsedCommand);
-        default:
-          return parsedCommand.language === 'ja' ? 
-            '未対応のToDoコマンドです' : 
-            '不支援的待辦指令';
-      }
+      console.log('⏰ 處理提醒指令:', command);
+      
+      const userId = event.source.userId;
+      const now = moment().tz('Asia/Tokyo');
+      
+      // 創建提醒記錄
+      const reminder = {
+        id: Date.now(),
+        userId: userId,
+        title: command.title || command.description,
+        description: command.description || '',
+        reminderTime: command.reminderTime,
+        type: command.type || 'once', // 'once', 'daily', 'weekly', etc.
+        isActive: true,
+        createdAt: now.toISOString()
+      };
+      
+      this.reminders.push(reminder);
+      
+      console.log('📝 提醒已建立:', reminder);
+      
+      // 準備回應訊息
+      const responseText = language === 'ja' ? 
+        `✅ リマインダーを設定しました！\n\n📋 内容: ${reminder.title}\n⏰ 時間: ${reminder.reminderTime}\n📅 種類: ${this.getTypeText(reminder.type, 'ja')}` :
+        `✅ 提醒設定成功！\n\n📋 內容: ${reminder.title}\n⏰ 時間: ${reminder.reminderTime}\n📅 類型: ${this.getTypeText(reminder.type, 'zh')}`;
+      
+      return {
+        type: 'text',
+        text: responseText
+      };
+      
     } catch (error) {
-      console.error('待辦處理錯誤:', error);
-      return parsedCommand.language === 'ja' ? 
-        'ToDoの処理に失敗しました' : 
-        '待辦處理失敗，請稍後再試';
+      console.error('❌ 提醒處理錯誤:', error);
+      const errorMsg = language === 'ja' ? 
+        'リマインダーの設定中にエラーが発生しました。' :
+        '設定提醒時發生錯誤，請稍後再試。';
+      
+      return {
+        type: 'text',
+        text: errorMsg
+      };
     }
   }
 
-  /**
-   * 新增待辦事項
-   */
-  async addTodo(parsedCommand) {
-    const todoData = {
-      userId: parsedCommand.userId,
-      title: parsedCommand.title,
-      description: parsedCommand.description || '',
-      priority: parsedCommand.priority || 'medium',
-      dueDate: parsedCommand.dueDate || '',
-      status: 'pending'
-    };
+  async handleQueryReminders(event, language) {
+    try {
+      const userId = event.source.userId;
+      const userReminders = this.reminders
+        .filter(reminder => reminder.userId === userId && reminder.isActive)
+        .sort((a, b) => new Date(a.reminderTime) - new Date(b.reminderTime));
 
-    const newTodo = await this.todoService.addTodo(todoData);
-    
-    const isJapanese = parsedCommand.language === 'ja';
-    let response = isJapanese ? 
-      `✅ ToDoを追加しました！\n📝 タイトル: ${newTodo.title}` :
-      `✅ 待辦事項已新增！\n📝 標題: ${newTodo.title}`;
-    
-    if (newTodo.description) {
-      response += isJapanese ? 
-        `\n📄 説明: ${newTodo.description}` :
-        `\n📄 說明: ${newTodo.description}`;
-    }
-    
-    if (newTodo.dueDate) {
-      response += isJapanese ?
-        `\n⏰ 期限: ${newTodo.dueDate}` :
-        `\n⏰ 截止日期: ${newTodo.dueDate}`;
-    }
-    
-    response += isJapanese ?
-      `\n🎯 優先度: ${this.getPriorityEmoji(newTodo.priority)} ${newTodo.priority}` :
-      `\n🎯 優先級: ${this.getPriorityEmoji(newTodo.priority)} ${newTodo.priority}`;
-
-    return response;
-  }
-
-  /**
-   * 列出待辦事項
-   */
-  async listTodos(parsedCommand) {
-    const status = parsedCommand.status || null;
-    const todos = await this.todoService.getUserTodos(parsedCommand.userId, status);
-    
-    const isJapanese = parsedCommand.language === 'ja';
-    
-    if (todos.length === 0) {
-      return isJapanese ? 
-        '📋 ToDoリストは空です' : 
-        '📋 目前沒有待辦事項';
-    }
-
-    const statusFilter = status ? (isJapanese ? 
-      `（${status === 'pending' ? '未完了' : status === 'completed' ? '完了' : status}のみ）` :
-      `（僅顯示${status === 'pending' ? '待處理' : status === 'completed' ? '已完成' : status}）`) : '';
-    
-    let response = isJapanese ? 
-      `📋 ToDoリスト${statusFilter}\n\n` :
-      `📋 您的待辦事項${statusFilter}\n\n`;
-
-    todos.forEach((todo, index) => {
-      const statusEmoji = this.getStatusEmoji(todo.status);
-      const priorityEmoji = this.getPriorityEmoji(todo.priority);
-      
-      response += `${index + 1}. ${statusEmoji} ${todo.title}\n`;
-      response += `   ${priorityEmoji} ${todo.priority}`;
-      
-      if (todo.dueDate) {
-        response += ` | ⏰ ${todo.dueDate}`;
+      if (userReminders.length === 0) {
+        const noRemindersMsg = language === 'ja' ? 
+          '現在設定されているリマインダーはありません。' :
+          '目前沒有設定任何提醒。';
+        
+        return {
+          type: 'text',
+          text: noRemindersMsg
+        };
       }
-      
-      response += `\n   ID: ${todo.id}\n\n`;
-    });
 
-    return response;
-  }
+      const title = language === 'ja' ? '📋 設定中のリマインダー一覧:' : '📋 目前的提醒列表:';
+      let responseText = title + '\n\n';
 
-  /**
-   * 完成待辦事項
-   */
-  async completeTodo(parsedCommand) {
-    const result = await this.todoService.updateTodoStatus(
-      parsedCommand.userId, 
-      parsedCommand.todoId, 
-      'completed'
-    );
+      userReminders.forEach((reminder, index) => {
+        responseText += `${index + 1}. ${reminder.title}\n`;
+        responseText += `   ⏰ ${reminder.reminderTime}\n`;
+        responseText += `   📅 ${this.getTypeText(reminder.type, language)}\n\n`;
+      });
 
-    const isJapanese = parsedCommand.language === 'ja';
-    return isJapanese ?
-      `✅ ToDoを完了しました！\nID: ${result.id}` :
-      `✅ 待辦事項已完成！\nID: ${result.id}`;
-  }
+      const deleteInstruction = language === 'ja' ? 
+        '\n削除したい場合は「リマインダー削除 [番号]」と送信してください。' :
+        '\n如要刪除請輸入「刪除提醒 [編號]」';
 
-  /**
-   * 刪除待辦事項
-   */
-  async deleteTodo(parsedCommand) {
-    const result = await this.todoService.deleteTodo(
-      parsedCommand.userId, 
-      parsedCommand.todoId
-    );
+      responseText += deleteInstruction;
 
-    const isJapanese = parsedCommand.language === 'ja';
-    return isJapanese ?
-      `🗑️ ToDoを削除しました\nID: ${result.id}` :
-      `🗑️ 待辦事項已刪除\nID: ${result.id}`;
-  }
+      return {
+        type: 'text',
+        text: responseText
+      };
 
-  /**
-   * 新增提醒事項
-   */
-  async addReminder(parsedCommand) {
-    const reminderData = {
-      userId: parsedCommand.userId,
-      title: parsedCommand.title,
-      message: parsedCommand.message || '',
-      reminderTime: parsedCommand.reminderTime,
-      isRecurring: parsedCommand.isRecurring || false,
-      recurringPattern: parsedCommand.recurringPattern || ''
-    };
-
-    const newReminder = await this.reminderService.addReminder(reminderData);
-    
-    const isJapanese = parsedCommand.language === 'ja';
-    let response = isJapanese ?
-      `⏰ リマインダーを追加しました！\n📝 タイトル: ${newReminder.title}\n🕐 時間: ${newReminder.reminderTime}` :
-      `⏰ 提醒已新增！\n📝 標題: ${newReminder.title}\n🕐 時間: ${newReminder.reminderTime}`;
-
-    if (newReminder.isRecurring) {
-      response += isJapanese ?
-        `\n🔄 繰り返し: ${newReminder.recurringPattern}` :
-        `\n🔄 重複模式: ${newReminder.recurringPattern}`;
+    } catch (error) {
+      console.error('❌ 查詢提醒錯誤:', error);
+      return {
+        type: 'text',
+        text: '查詢提醒時發生錯誤。'
+      };
     }
-
-    return response;
   }
 
-  /**
-   * 列出提醒事項
-   */
-  async listReminders(parsedCommand) {
-    const reminders = await this.reminderService.getUserReminders(parsedCommand.userId);
-    
-    const isJapanese = parsedCommand.language === 'ja';
-    
-    if (reminders.length === 0) {
-      return isJapanese ?
-        '⏰ リマインダーは設定されていません' :
-        '⏰ 目前沒有提醒事項';
-    }
+  async handleDeleteReminder(event, command, language) {
+    try {
+      const userId = event.source.userId;
+      const reminderIndex = parseInt(command.index) - 1;
 
-    let response = isJapanese ?
-      '⏰ リマインダー一覧\n\n' :
-      '⏰ 您的提醒事項\n\n';
+      const userReminders = this.reminders
+        .filter(reminder => reminder.userId === userId && reminder.isActive)
+        .sort((a, b) => new Date(a.reminderTime) - new Date(b.reminderTime));
 
-    reminders.forEach((reminder, index) => {
-      response += `${index + 1}. 📝 ${reminder.title}\n`;
-      response += `   🕐 ${reminder.reminderTime}`;
-      
-      if (reminder.isRecurring) {
-        response += isJapanese ?
-          ` | 🔄 ${reminder.recurringPattern}` :
-          ` | 🔄 ${reminder.recurringPattern}`;
+      if (reminderIndex < 0 || reminderIndex >= userReminders.length) {
+        const errorMsg = language === 'ja' ? 
+          '無効な番号です。リマインダー一覧を確認してください。' :
+          '無效的編號，請查看提醒列表。';
+        
+        return {
+          type: 'text',
+          text: errorMsg
+        };
       }
-      
-      response += `\n   ID: ${reminder.id}\n\n`;
-    });
 
-    return response;
+      const reminderToDelete = userReminders[reminderIndex];
+      reminderToDelete.isActive = false;
+
+      const successMsg = language === 'ja' ? 
+        `✅ リマインダー「${reminderToDelete.title}」を削除しました。` :
+        `✅ 已刪除提醒「${reminderToDelete.title}」`;
+
+      return {
+        type: 'text',
+        text: successMsg
+      };
+
+    } catch (error) {
+      console.error('❌ 刪除提醒錯誤:', error);
+      return {
+        type: 'text',
+        text: '刪除提醒時發生錯誤。'
+      };
+    }
   }
 
-  /**
-   * 刪除提醒事項
-   */
-  async deleteReminder(parsedCommand) {
-    const result = await this.reminderService.deleteReminder(
-      parsedCommand.userId, 
-      parsedCommand.reminderId
-    );
-
-    const isJapanese = parsedCommand.language === 'ja';
-    return isJapanese ?
-      `🗑️ リマインダーを削除しました\nID: ${result.id}` :
-      `🗑️ 提醒已刪除\nID: ${result.id}`;
-  }
-
-  /**
-   * 取得狀態 emoji
-   */
-  getStatusEmoji(status) {
-    const statusEmojis = {
-      'pending': '⏳',
-      'in_progress': '🔄',
-      'completed': '✅',
-      'cancelled': '❌'
+  getTypeText(type, language) {
+    const types = {
+      'once': { ja: '一回のみ', zh: '單次' },
+      'daily': { ja: '毎日', zh: '每天' },
+      'weekly': { ja: '毎週', zh: '每週' },
+      'monthly': { ja: '毎月', zh: '每月' }
     };
-    return statusEmojis[status] || '❓';
-  }
-
-  /**
-   * 取得優先級 emoji
-   */
-  getPriorityEmoji(priority) {
-    const priorityEmojis = {
-      'high': '🔴',
-      'medium': '🟡',
-      'low': '🟢'
-    };
-    return priorityEmojis[priority] || '⚪';
+    
+    return types[type] ? types[type][language] : type;
   }
 
   /**
    * 取得幫助訊息
    */
-  getHelpMessage(language = 'zh-tw') {
+  getHelpMessage(language = 'zh') {
     if (language === 'ja') {
-      return `📚 ToDo機能ヘルプ\n\n📝 ToDo追加:\n• Todo追加 タイトル [説明]\n例: Todo追加 買い物 牛乳とパンを買う\n\n📋 ToDo確認:\n• Todoリスト\n• 完了リスト\n• 未完了リスト\n\n✅ ToDo完了:\n• Todo完了 ID\n例: Todo完了 todo_123\n\n🗑️ ToDo削除:\n• Todo削除 ID\n例: Todo削除 todo_123\n\n⏰ リマインダー:\n• リマインダー追加 タイトル 時間\n例: リマインダー追加 会議 2024-01-15 14:00\n• リマインダーリスト\n• リマインダー削除 ID`;
+      return `📚 リマインダー機能ヘルプ\n\n⏰ リマインダー設定:\n• 明日8時に薬を飲む\n• 毎日19時に運動\n• 毎週月曜日に会議\n\n📋 リマインダー確認:\n• リマインダー一覧\n• リマインダー削除 [番号]`;
     }
     
-    return `📚 待辦功能說明\n\n📝 新增待辦:\n• 新增待辦 標題 [說明]\n例: 新增待辦 買菜 購買晚餐食材\n\n📋 查看待辦:\n• 待辦清單\n• 已完成清單\n• 待處理清單\n\n✅ 完成待辦:\n• 完成待辦 ID\n例: 完成待辦 todo_123\n\n🗑️ 刪除待辦:\n• 刪除待辦 ID\n例: 刪除待辦 todo_123\n\n⏰ 提醒功能:\n• 新增提醒 標題 時間\n例: 新增提醒 開會 2024-01-15 14:00\n• 提醒清單\n• 刪除提醒 ID`;
+    return `📚 提醒功能說明\n\n⏰ 提醒設定:\n• 明天8點吃藥\n• 每天晚上7點運動\n• 每週一開會\n\n📋 提醒管理:\n• 查看提醒\n• 刪除提醒 [編號]`;
   }
 }
 
