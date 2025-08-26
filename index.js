@@ -915,22 +915,17 @@ function getHelpMessage(language = 'zh') {
   }
 }
 
-// 健康檢查路由
-app.get('/', (req, res) => {
-  res.json({
-    status: 'LINE記帳機器人運行中（修復版）',
-    timestamp: new Date().toISOString(),
-    version: '4.1.0',
-    features: [
-      '月度預算設定',
-      '剩餘金額計算',
-      '預算使用率監控',
-      '每日可用金額',
-      '預算警告提醒',
-      '全形空格支援',
-      '自然語言處理',
-      '智能日期識別',
-      '中日雙語支援'
-    ]
-  });
+}); // 健康檢查路由の終了
+
+// 伺服器啟動
+app.listen(port, () => {
+  console.log(`LINE記帳機器人服務器運行在埠口 ${port}`);
+  console.log('✅ 記帳功能已修復：');
+  console.log('- 月度預算管理');
+  console.log('- 剩餘金額自動計算');
+  console.log('- 預算使用率監控');
+  console.log('- 每日可用金額顯示');
+  console.log('- 預算超支警告');
+  console.log('- 記帳後即時顯示剩餘預算');
 });
+
