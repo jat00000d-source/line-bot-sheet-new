@@ -8,8 +8,7 @@ const moment = require('moment-timezone');
 moment.tz.setDefault('Asia/Tokyo');
 
 // Controllers
-const ExpenseController = require('./controllers/expenseController');
-const TodoController = require('./controllers/todoController');
+const { ExpenseController, TodoController } = require('./controllers/expenseController');
 
 // Services
 const ReminderScheduler = require('./services/reminderScheduler');
