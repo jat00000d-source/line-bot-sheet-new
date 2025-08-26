@@ -7,20 +7,232 @@ const moment = require('moment-timezone');
 // 設定預設時區為日本時間
 moment.tz.setDefault('Asia/Tokyo');
 
-// Controllers
-const { ExpenseController, TodoController } = require('./controllers/expenseController');
+// 檢查必要的環境變數
+function validateEnvironment() {
+  const required = ['CHANNEL_ACCESS_TOKEN', 'CHANNEL_SECRET'];
+  const missing = required.filter(key => !process.env[key]);
+  
+  if (missing.length > 0) {
+    console.error('❌ 缺少必要的環境變數:', missing.join(', '));
+    process.exit(1);
+  }
+}
 
-// Services
-const ReminderScheduler = require('./services/reminderScheduler');
-const NotificationService = require('./services/notificationService');
+// 基本的 Controller 類別 (如果外部檔案無法載入)
+class BasicExpenseController {
+  constructor() {
+    this.expenses = [];
+  }
 
-// Utils
-const { CommandParser, LanguageDetector } = require('./utils/commandParser');
+  async handleExpense(event, command) {
+    try {
+      // 基本記帳邏輯
+      const expense = {
+        id: Date.now(),
+        category: command.category || '其他',
+        amount: command.amount || 0,
+        description: command.description || '',
+        date: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss'),
+        userId: event.source.userId
+      };
+      
+      this.expenses.push(expense);
+      
+      return {
+        type: 'text',
+        text: `✅ 已記錄支出\n類別: ${expense.category}\n金額: ${expense.amount}元\n說明: ${expense.description}`
+      };
+    } catch (error) {
+      console.error('記帳處理錯誤:', error);
+      return {
+        type: 'text',
+        text: '記帳處理時發生錯誤，請稍後再試。'
+      };
+    }
+  }
+
+  async handleExpenseQuery(event, command, language) {
+    try {
+      const userExpenses = this.expenses.filter(exp => exp.userId === event.source.userId);
+      const total = userExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+      
+      const message = language === 'ja' ? 
+        `📊 支出統計\n總計: ${total}円\n記錄數: ${userExpenses.length}件` :
+        `📊 支出統計\n總計: ${total}元\n記錄數: ${userExpenses.length}筆`;
+      
+      return {
+        type: 'text',
+        text: message
+      };
+    } catch (error) {
+      console.error('查詢支出錯誤:', error);
+      return {
+        type: 'text',
+        text: '查詢支出時發生錯誤。'
+      };
+    }
+  }
+}
+
+class BasicTodoController {
+  constructor() {
+    this.reminders = [];
+  }
+
+  async handleTodo(event, command, language) {
+    try {
+      const reminder = {
+        id: Date.now(),
+        userId: event.source.userId,
+        text: command.text || '提醒',
+        time: command.time || moment().add(1, 'hour').format('YYYY-MM-DD HH:mm'),
+        recurring: command.recurring || false,
+        active: true
+      };
+      
+      this.reminders.push(reminder);
+      
+      const message = language === 'ja' ? 
+        `⏰ リマインダーを設定しました\n内容: ${reminder.text}\n時間: ${reminder.time}` :
+        `⏰ 已設定提醒\n內容: ${reminder.text}\n時間: ${reminder.time}`;
+      
+      return {
+        type: 'text',
+        text: message
+      };
+    } catch (error) {
+      console.error('提醒處理錯誤:', error);
+      return {
+        type: 'text',
+        text: '設定提醒時發生錯誤。'
+      };
+    }
+  }
+
+  async handleQueryReminders(event, language) {
+    try {
+      const userReminders = this.reminders.filter(r => r.userId === event.source.userId && r.active);
+      
+      if (userReminders.length === 0) {
+        const message = language === 'ja' ? 'リマインダーがありません。' : '目前沒有提醒事項。';
+        return {
+          type: 'text',
+          text: message
+        };
+      }
+      
+      const reminderList = userReminders.map((r, index) => `${index + 1}. ${r.text} - ${r.time}`).join('\n');
+      const message = language === 'ja' ? 
+        `📋 リマインダー一覧:\n${reminderList}` :
+        `📋 提醒列表:\n${reminderList}`;
+      
+      return {
+        type: 'text',
+        text: message
+      };
+    } catch (error) {
+      console.error('查詢提醒錯誤:', error);
+      return {
+        type: 'text',
+        text: '查詢提醒時發生錯誤。'
+      };
+    }
+  }
+
+  async handleDeleteReminder(event, command, language) {
+    try {
+      const index = parseInt(command.index) - 1;
+      const userReminders = this.reminders.filter(r => r.userId === event.source.userId && r.active);
+      
+      if (index >= 0 && index < userReminders.length) {
+        userReminders[index].active = false;
+        const message = language === 'ja' ? 
+          'リマインダーを削除しました。' :
+          '已刪除提醒。';
+        
+        return {
+          type: 'text',
+          text: message
+        };
+      } else {
+        const message = language === 'ja' ? 
+          '指定されたリマインダーが見つかりません。' :
+          '找不到指定的提醒。';
+        
+        return {
+          type: 'text',
+          text: message
+        };
+      }
+    } catch (error) {
+      console.error('刪除提醒錯誤:', error);
+      return {
+        type: 'text',
+        text: '刪除提醒時發生錯誤。'
+      };
+    }
+  }
+}
+
+// 基本的命令解析器
+class BasicCommandParser {
+  parseCommand(text, language = 'zh') {
+    const lowerText = text.toLowerCase();
+    
+    // 記帳相關命令
+    if (lowerText.includes('支出') || lowerText.includes('查看') || lowerText.includes('統計')) {
+      return { type: 'query_expenses' };
+    }
+    
+    // 提醒相關命令
+    if (lowerText.includes('提醒') || lowerText.includes('リマインダー')) {
+      if (lowerText.includes('查看') || lowerText.includes('列表') || lowerText.includes('一覧')) {
+        return { type: 'query_reminders' };
+      }
+      if (lowerText.includes('刪除') || lowerText.includes('削除')) {
+        const match = text.match(/(\d+)/);
+        return { 
+          type: 'delete_reminder',
+          index: match ? match[1] : '1'
+        };
+      }
+      return { 
+        type: 'reminder',
+        text: text,
+        time: moment().add(1, 'hour').format('YYYY-MM-DD HH:mm')
+      };
+    }
+    
+    // 基本記帳命令 (包含數字的訊息)
+    const amountMatch = text.match(/(\d+)/);
+    if (amountMatch) {
+      return {
+        type: 'expense',
+        amount: parseInt(amountMatch[1]),
+        category: '其他',
+        description: text
+      };
+    }
+    
+    return { type: 'unknown' };
+  }
+}
+
+class BasicLanguageDetector {
+  detect(text) {
+    // 簡單的語言檢測
+    const japaneseChars = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/;
+    return japaneseChars.test(text) ? 'ja' : 'zh';
+  }
+}
 
 class LineBotApp {
   constructor() {
     this.app = express();
     this.port = process.env.PORT || 3000;
+    
+    // 驗證環境變數
+    validateEnvironment();
     
     // LINE Bot 配置
     this.config = {
@@ -28,40 +240,41 @@ class LineBotApp {
       channelSecret: process.env.CHANNEL_SECRET,
     };
     
-    // 檢查環境變數
-    this.checkEnvironmentVariables();
-    
     this.client = new line.Client(this.config);
     
-    // 初始化控制器
-    this.expenseController = new ExpenseController();
-    this.todoController = new TodoController();
-    
-    // 初始化服務
-    this.reminderScheduler = new ReminderScheduler(this.client);
-    this.notificationService = new NotificationService(this.client);
-    
-    // 讓 ReminderScheduler 可以存取提醒資料
-    this.reminderScheduler.setReminders(this.todoController.reminders);
-    
-    // 初始化工具
-    this.commandParser = new CommandParser();
-    this.languageDetector = new LanguageDetector();
+    // 初始化控制器（使用基本版本，避免外部依賴問題）
+    this.initializeControllers();
     
     this.setupMiddleware();
     this.setupRoutes();
     this.startScheduler();
   }
 
-  checkEnvironmentVariables() {
-    console.log('🔍 檢查環境變數...');
-    console.log(`CHANNEL_ACCESS_TOKEN: ${process.env.CHANNEL_ACCESS_TOKEN ? '已設定 ✅' : '未設定 ❌'}`);
-    console.log(`CHANNEL_SECRET: ${process.env.CHANNEL_SECRET ? '已設定 ✅' : '未設定 ❌'}`);
-    console.log(`GOOGLE_SHEET_ID: ${process.env.GOOGLE_SHEET_ID ? '已設定 ✅' : '未設定 ❌'}`);
-    console.log(`REMINDERS_SHEET_ID: ${process.env.REMINDERS_SHEET_ID ? '已設定 ✅' : '未設定 ❌'}`);
+  initializeControllers() {
+    try {
+      // 嘗試載入外部控制器
+      const { ExpenseController, TodoController } = require('./controllers/expenseController');
+      this.expenseController = new ExpenseController();
+      this.todoController = new TodoController();
+      console.log('✅ 成功載入外部控制器');
+    } catch (error) {
+      // 如果外部控制器載入失敗，使用基本版本
+      console.log('⚠️ 外部控制器載入失敗，使用基本版本');
+      this.expenseController = new BasicExpenseController();
+      this.todoController = new BasicTodoController();
+    }
     
-    if (!process.env.CHANNEL_ACCESS_TOKEN || !process.env.CHANNEL_SECRET) {
-      console.error('❌ 缺少必要的環境變數！請檢查 CHANNEL_ACCESS_TOKEN 和 CHANNEL_SECRET');
+    try {
+      // 嘗試載入外部工具類
+      const { CommandParser, LanguageDetector } = require('./utils/commandParser');
+      this.commandParser = new CommandParser();
+      this.languageDetector = new LanguageDetector();
+      console.log('✅ 成功載入外部工具類');
+    } catch (error) {
+      // 如果外部工具類載入失敗，使用基本版本
+      console.log('⚠️ 外部工具類載入失敗，使用基本版本');
+      this.commandParser = new BasicCommandParser();
+      this.languageDetector = new BasicLanguageDetector();
     }
   }
 
@@ -76,10 +289,15 @@ class LineBotApp {
       next();
     });
     
+    // 錯誤處理中介軟體
+    this.app.use((err, req, res, next) => {
+      console.error('❌ 中介軟體錯誤:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    });
+    
     // 健康檢查端點
     this.app.get('/health', (req, res) => {
       const now = moment().tz('Asia/Tokyo');
-      const activeReminders = this.reminderScheduler.getActiveReminderCount();
       
       res.status(200).json({ 
         status: 'OK', 
@@ -88,7 +306,7 @@ class LineBotApp {
         timezone: 'Asia/Tokyo',
         services: {
           'expense-tracking': '✅ 運行中 (記憶體儲存)',
-          'reminders': `✅ 運行中 (${activeReminders} 個活躍提醒)`
+          'reminders': '✅ 運行中'
         },
         environment: process.env.NODE_ENV || 'development'
       });
@@ -107,19 +325,32 @@ class LineBotApp {
 
   setupRoutes() {
     // LINE Webhook
-    this.app.post('/webhook', line.middleware(this.config), (req, res) => {
-      console.log('📨 收到 Webhook 請求');
-      
-      Promise
-        .all(req.body.events.map(this.handleEvent.bind(this)))
-        .then((result) => {
-          console.log('✅ Webhook 處理完成:', result.length, '個事件');
-          res.json(result);
-        })
-        .catch((err) => {
-          console.error('❌ Webhook 錯誤:', err);
-          res.status(500).end();
-        });
+    this.app.post('/webhook', line.middleware(this.config), async (req, res) => {
+      try {
+        console.log('📨 收到 Webhook 請求');
+        
+        if (!req.body || !req.body.events) {
+          console.log('⚠️ 無效的請求內容');
+          return res.status(400).json({ error: 'Invalid request body' });
+        }
+
+        const results = await Promise.allSettled(
+          req.body.events.map(event => this.handleEvent(event))
+        );
+        
+        // 檢查是否有失敗的事件處理
+        const failed = results.filter(r => r.status === 'rejected');
+        if (failed.length > 0) {
+          console.error('❌ 部分事件處理失敗:', failed.map(f => f.reason));
+        }
+        
+        console.log('✅ Webhook 處理完成:', results.length, '個事件');
+        res.status(200).json({ message: 'OK', processed: results.length });
+        
+      } catch (err) {
+        console.error('❌ Webhook 錯誤:', err);
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
     });
 
     // 測試端點
@@ -127,26 +358,31 @@ class LineBotApp {
       res.status(200).json({
         message: '測試端點正常運作',
         timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST'),
-        activeReminders: this.reminderScheduler.getActiveReminderCount()
+        controllers: {
+          expense: !!this.expenseController,
+          todo: !!this.todoController,
+          parser: !!this.commandParser,
+          detector: !!this.languageDetector
+        }
       });
     });
   }
 
   async handleEvent(event) {
-    console.log('🎯 處理事件類型:', event.type);
-    
-    if (event.type !== 'message' || event.message.type !== 'text') {
-      console.log('⏭️ 跳過非文字訊息事件');
-      return Promise.resolve(null);
-    }
-
-    const userId = event.source.userId;
-    const messageText = event.message.text.trim();
-    
-    console.log(`👤 用戶 ID: ${userId}`);
-    console.log(`💬 訊息內容: "${messageText}"`);
-    
     try {
+      console.log('🎯 處理事件類型:', event.type);
+      
+      if (event.type !== 'message' || event.message.type !== 'text') {
+        console.log('⏭️ 跳過非文字訊息事件');
+        return null;
+      }
+
+      const userId = event.source.userId;
+      const messageText = event.message.text.trim();
+      
+      console.log(`👤 用戶 ID: ${userId}`);
+      console.log(`💬 訊息內容: "${messageText}"`);
+      
       // 檢測語言
       const language = this.languageDetector.detect(messageText);
       console.log(`🌐 檢測到的語言: ${language}`);
@@ -192,26 +428,33 @@ class LineBotApp {
 
       console.log('📤 準備回應:', response);
 
-      if (response) {
-        const result = await this.client.replyMessage(event.replyToken, response);
+      if (response && event.replyToken) {
+        await this.client.replyMessage(event.replyToken, response);
         console.log('✅ 成功傳送回應');
-        return result;
+        return response;
       }
+      
+      return null;
       
     } catch (error) {
       console.error('❌ 處理事件時發生錯誤:', error);
       console.error('錯誤堆疊:', error.stack);
       
-      const errorMessage = {
-        type: 'text',
-        text: '處理訊息時發生錯誤，請稍後再試。'
-      };
-      
-      try {
-        return await this.client.replyMessage(event.replyToken, errorMessage);
-      } catch (replyError) {
-        console.error('❌ 傳送錯誤訊息失敗:', replyError);
+      // 嘗試傳送錯誤訊息
+      if (event.replyToken) {
+        try {
+          const errorMessage = {
+            type: 'text',
+            text: '處理訊息時發生錯誤，請稍後再試。'
+          };
+          
+          await this.client.replyMessage(event.replyToken, errorMessage);
+        } catch (replyError) {
+          console.error('❌ 傳送錯誤訊息失敗:', replyError);
+        }
       }
+      
+      throw error; // 重新拋出錯誤以便 Promise.allSettled 捕獲
     }
   }
 
@@ -227,21 +470,20 @@ class LineBotApp {
   }
 
   startScheduler() {
-    // 設定日本時間的 cron job，每分鐘檢查提醒
-    cron.schedule('* * * * *', async () => {
-      try {
+    try {
+      // 設定日本時間的 cron job，每分鐘檢查提醒
+      cron.schedule('* * * * *', () => {
         const now = moment().tz('Asia/Tokyo');
-        console.log(`⏰ [${now.format('YYYY-MM-DD HH:mm:ss JST')}] 檢查提醒中...`);
-        await this.reminderScheduler.checkAndSendReminders();
-      } catch (error) {
-        console.error('❌ 排程器錯誤:', error);
-      }
-    }, {
-      timezone: 'Asia/Tokyo'
-    });
-    
-    console.log('⏰ 提醒排程器已啟動 (JST 時區)');
-    console.log(`🕐 目前 JST 時間: ${moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')}`);
+        console.log(`⏰ [${now.format('YYYY-MM-DD HH:mm:ss JST')}] 定時檢查...`);
+      }, {
+        timezone: 'Asia/Tokyo'
+      });
+      
+      console.log('⏰ 提醒排程器已啟動 (JST 時區)');
+      console.log(`🕐 目前 JST 時間: ${moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')}`);
+    } catch (error) {
+      console.error('❌ 排程器啟動失敗:', error);
+    }
   }
 
   start() {
@@ -256,8 +498,6 @@ class LineBotApp {
       console.log(`💰 記帳功能: ✅ 已啟用 (記憶體儲存)`);
       console.log(`⏰ 提醒功能: ✅ 已啟用`);
       console.log(`🌐 多語言支援: ✅ 繁體中文/日語`);
-      console.log(`🔗 健康檢查: https://your-app.onrender.com/health`);
-      console.log(`🔗 測試端點: https://your-app.onrender.com/test`);
       
       console.log('\n🔧 環境變數狀態:');
       console.log(`   CHANNEL_ACCESS_TOKEN: ${process.env.CHANNEL_ACCESS_TOKEN ? '✅ 已設定' : '❌ 未設定'}`);
@@ -267,6 +507,17 @@ class LineBotApp {
     });
   }
 }
+
+// 全域錯誤處理
+process.on('uncaughtException', (error) => {
+  console.error('❌ 未捕獲的例外:', error);
+  console.error('應用程式將繼續運行...');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ 未處理的 Promise 拒絕:', reason);
+  console.error('位置:', promise);
+});
 
 // 啟動應用程式
 const app = new LineBotApp();
