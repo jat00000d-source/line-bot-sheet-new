@@ -6,6 +6,90 @@ class DateTimeParser {
 
   // 初始化關鍵字字典
   initializeKeywords() {
+    // 相對日期關鍵字
+    this.relativeDates = {
+      // 中文
+      '今天': 0, '明天': 1, '後天': 2, '大後天': 3,
+      '昨天': -1, '前天': -2, '大前天': -3,
+      '今日': 0, '明日': 1,
+      
+      // 日文
+      '今日': 0, '明日': 1, '明後日': 2,
+      '昨日': -1, '一昨日': -2,
+      'きょう': 0, 'あした': 1, 'あさって': 2,
+      'きのう': -1, 'おととい': -2
+    };
+
+    // 星期關鍵字
+    this.weekdays = {
+      // 中文
+      '星期一': 1, '星期二': 2, '星期三': 3, '星期四': 4, '星期五': 5, '星期六': 6, '星期日': 0,
+      '週一': 1, '週二': 2, '週三': 3, '週四': 4, '週五': 5, '週六': 6, '週日': 0,
+      '禮拜一': 1, '禮拜二': 2, '禮拜三': 3, '禮拜四': 4, '禮拜五': 5, '禮拜六': 6, '禮拜日': 0,
+      
+      // 日文
+      '月曜日': 1, '火曜日': 2, '水曜日': 3, '木曜日': 4, '金曜日': 5, '土曜日': 6, '日曜日': 0,
+      '月曜': 1, '火曜': 2, '水曜': 3, '木曜': 4, '金曜': 5, '土曜': 6, '日曜': 0
+    };
+
+    // 時間關鍵字
+    this.timeKeywords = {
+      // 中文
+      '早上': 9, '上午': 10, '中午': 12, '下午': 14, '晚上': 19, '深夜': 23,
+      '清晨': 6, '黃昏': 18, '午夜': 0,
+      
+      // 日文
+      '朝': 9, '午前': 10, '正午': 12, '午後': 14, '夜': 19, '深夜': 23,
+      '夕方': 18, '真夜中': 0
+    };
+
+    // 重複模式關鍵字
+    this.repeatKeywords = {
+      // 中文
+      '每天': 'daily', '每日': 'daily', '天天': 'daily',
+      '每週': 'weekly', '每星期': 'weekly',
+      '每月': 'monthly', '每個月': 'monthly',
+      
+      // 日文
+      '毎日': 'daily', '日々': 'daily',
+      '毎週': 'weekly', '週毎': 'weekly',
+      '毎月': 'monthly', '月毎': 'monthly'
+    };
+
+    // 相對週期關鍵字
+    this.relativeWeeks = {
+      // 中文
+      '下週': 1, '下星期': 1, '下個星期': 1,
+      '下下週': 2, '下下星期': 2,
+      '上週': -1, '上星期': -1, '上個星期': -1,
+      
+      // 日文
+      '来週': 1, '再来週': 2, '先週': -1
+    };
+
+    this.relativeMonths = {
+      // 中文
+      '下個月': 1, '下月': 1, '來月': 1,
+      '上個月': -1, '上月': -1,
+      
+      // 日文
+      '来月': 1, '再来月': 2, '先月': -1
+    };
+  }
+
+  // 解析重複模式
+  parseRepeatPattern(text) {
+    // 檢查複雜週期模式
+    const complexWeekly = this.parseComplexWeeklyPattern(text);
+    if (complexWeekly) {
+      return complexWeekly;
+    }
+
+    const complexMonthly = this.parseComplexMonthlyPattern(text);
+    if (complexMonthly) {
+      return complexMonthly;
+    }
+
     // 檢查自定義間隔（如：每3天、每7天）
     const customIntervalMatch = text.match(/每(\d+)[天日]/);
     if (customIntervalMatch) {
@@ -14,6 +98,42 @@ class DateTimeParser {
         type: 'custom',
         pattern: interval.toString()
       };
+    }
+
+    // 檢查重複關鍵字
+    for (const [keyword, type] of Object.entries(this.repeatKeywords)) {
+      if (text.includes(keyword)) {
+        let pattern = '';
+        
+        switch (type) {
+          case 'weekly':
+            // 嘗試提取星期幾的模式
+            const weekdays = [];
+            for (const [dayKeyword, dayOfWeek] of Object.entries(this.weekdays)) {
+              if (text.includes(dayKeyword)) {
+                weekdays.push(dayOfWeek);
+              }
+            }
+            pattern = weekdays.length > 0 ? weekdays.join(',') : '1'; // 預設週一
+            break;
+            
+          case 'monthly':
+            // 嘗試提取日期模式
+            const dateMatch = text.match(/(\d{1,2})[日號号]/);
+            pattern = dateMatch ? dateMatch[1] : '1'; // 預設每月1號
+            break;
+            
+          case 'daily':
+          default:
+            pattern = '';
+            break;
+        }
+        
+        return {
+          type: type,
+          pattern: pattern
+        };
+      }
     }
     
     // 預設為一次性提醒
@@ -256,78 +376,6 @@ class DateTimeParser {
     }
 
     return results;
-  }
-}
-
-module.exports = DateTimeParser; 相對日期關鍵字
-    this.relativeDates = {
-      // 中文
-      '今天': 0, '明天': 1, '後天': 2, '大後天': 3,
-      '昨天': -1, '前天': -2, '大前天': -3,
-      '今日': 0, '明日': 1,
-      
-      // 日文
-      '今日': 0, '明日': 1, '明後日': 2,
-      '昨日': -1, '一昨日': -2,
-      'きょう': 0, 'あした': 1, 'あさって': 2,
-      'きのう': -1, 'おととい': -2
-    };
-
-    // 星期關鍵字
-    this.weekdays = {
-      // 中文
-      '星期一': 1, '星期二': 2, '星期三': 3, '星期四': 4, '星期五': 5, '星期六': 6, '星期日': 0,
-      '週一': 1, '週二': 2, '週三': 3, '週四': 4, '週五': 5, '週六': 6, '週日': 0,
-      '禮拜一': 1, '禮拜二': 2, '禮拜三': 3, '禮拜四': 4, '禮拜五': 5, '禮拜六': 6, '禮拜日': 0,
-      
-      // 日文
-      '月曜日': 1, '火曜日': 2, '水曜日': 3, '木曜日': 4, '金曜日': 5, '土曜日': 6, '日曜日': 0,
-      '月曜': 1, '火曜': 2, '水曜': 3, '木曜': 4, '金曜': 5, '土曜': 6, '日曜': 0
-    };
-
-    // 時間關鍵字
-    this.timeKeywords = {
-      // 中文
-      '早上': 9, '上午': 10, '中午': 12, '下午': 14, '晚上': 19, '深夜': 23,
-      '清晨': 6, '黃昏': 18, '午夜': 0,
-      
-      // 日文
-      '朝': 9, '午前': 10, '正午': 12, '午後': 14, '夜': 19, '深夜': 23,
-      '夕方': 18, '真夜中': 0
-    };
-
-    // 重複模式關鍵字
-    this.repeatKeywords = {
-      // 中文
-      '每天': 'daily', '每日': 'daily', '天天': 'daily',
-      '每週': 'weekly', '每星期': 'weekly',
-      '每月': 'monthly', '每個月': 'monthly',
-      
-      // 日文
-      '毎日': 'daily', '日々': 'daily',
-      '毎週': 'weekly', '週毎': 'weekly',
-      '毎月': 'monthly', '月毎': 'monthly'
-    };
-
-    // 相對週期關鍵字
-    this.relativeWeeks = {
-      // 中文
-      '下週': 1, '下星期': 1, '下個星期': 1,
-      '下下週': 2, '下下星期': 2,
-      '上週': -1, '上星期': -1, '上個星期': -1,
-      
-      // 日文
-      '来週': 1, '再来週': 2, '先週': -1
-    };
-
-    this.relativeMonths = {
-      // 中文
-      '下個月': 1, '下月': 1, '來月': 1,
-      '上個月': -1, '上月': -1,
-      
-      // 日文
-      '来月': 1, '再来月': 2, '先月': -1
-    };
   }
 
   // 主要解析函數
@@ -620,43 +668,6 @@ module.exports = DateTimeParser; 相對日期關鍵字
     
     return targetDate;
   }
+}
 
-  // 解析重複模式
-  parseRepeatPattern(text) {
-    // 檢查重複關鍵字
-    for (const [keyword, type] of Object.entries(this.repeatKeywords)) {
-      if (text.includes(keyword)) {
-        let pattern = '';
-        
-        switch (type) {
-          case 'weekly':
-            // 嘗試提取星期幾的模式
-            const weekdays = [];
-            for (const [dayKeyword, dayOfWeek] of Object.entries(this.weekdays)) {
-              if (text.includes(dayKeyword)) {
-                weekdays.push(dayOfWeek);
-              }
-            }
-            pattern = weekdays.length > 0 ? weekdays.join(',') : '1'; // 預設週一
-            break;
-            
-          case 'monthly':
-            // 嘗試提取日期模式
-            const dateMatch = text.match(/(\d{1,2})[日號号]/);
-            pattern = dateMatch ? dateMatch[1] : '1'; // 預設每月1號
-            break;
-            
-          case 'daily':
-          default:
-            pattern = '';
-            break;
-        }
-        
-        return {
-          type: type,
-          pattern: pattern
-        };
-      }
-    }
-    
-    //
+module.exports = DateTimeParser;
