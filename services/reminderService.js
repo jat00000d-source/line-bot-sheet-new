@@ -248,4 +248,343 @@ class ReminderService {
           const userIdMatch = row.get('user_id') === userId;
           return status === 'active' && userIdMatch;
         })
-        .
+        .map(row => ({
+          id: row.get('id'),
+          title: row.get('title'),
+          description: row.get('description'),
+          type: row.get('type'),
+          datetime: row.get('datetime'),
+          pattern: row.get('pattern'),
+          location: row.get('location'),
+          language: row.get('language'),
+          status: row.get('status'),
+          created_at: row.get('created_at'),
+          next_trigger: row.get('next_trigger'),
+          rowIndex: row.rowIndex // 保存行索引以便後續操作
+        }))
+        .sort((a, b) => new Date(a.next_trigger) - new Date(b.next_trigger)); // 按觸發時間排序
+
+      return activeReminders;
+
+    } catch (error) {
+      console.error('獲取活躍提醒錯誤:', error);
+      return [];
+    }
+  }
+
+  // 獲取待觸發的提醒（用於排程檢查）
+  async getPendingReminders(checkTime = new Date()) {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const pendingReminders = rows
+        .filter(row => {
+          const status = row.get('status');
+          const nextTrigger = new Date(row.get('next_trigger'));
+          return status === 'active' && nextTrigger <= checkTime;
+        })
+        .map(row => ({
+          id: row.get('id'),
+          title: row.get('title'),
+          description: row.get('description'),
+          type: row.get('type'),
+          datetime: row.get('datetime'),
+          pattern: row.get('pattern'),
+          location: row.get('location'),
+          language: row.get('language'),
+          next_trigger: row.get('next_trigger'),
+          user_id: row.get('user_id'),
+          row: row // 保存完整的行對象以便更新
+        }));
+
+      console.log(`發現 ${pendingReminders.length} 個待觸發提醒`);
+      return pendingReminders;
+
+    } catch (error) {
+      console.error('獲取待觸發提醒錯誤:', error);
+      return [];
+    }
+  }
+
+  // 完成提醒
+  async completeReminder(reminderId, userId = 'default') {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const reminderRow = rows.find(row => 
+        row.get('id') === reminderId && row.get('user_id') === userId
+      );
+      
+      if (!reminderRow) {
+        return {
+          success: false,
+          error: '找不到指定的提醒'
+        };
+      }
+
+      const reminderType = reminderRow.get('type');
+      
+      if (reminderType === 'once') {
+        // 一次性提醒：標記為已完成
+        reminderRow.set('status', 'completed');
+        await reminderRow.save();
+      } else {
+        // 重複提醒：計算下次觸發時間
+        const currentDateTime = new Date(reminderRow.get('datetime'));
+        const pattern = reminderRow.get('pattern');
+        const nextTrigger = this.calculateNextTrigger(currentDateTime, reminderType, pattern);
+        
+        reminderRow.set('next_trigger', nextTrigger.toISOString());
+        await reminderRow.save();
+      }
+
+      console.log('✅ 提醒完成處理成功:', reminderId);
+      return {
+        success: true,
+        message: '提醒已完成'
+      };
+
+    } catch (error) {
+      console.error('完成提醒錯誤:', error);
+      return {
+        success: false,
+        error: '完成提醒處理失敗'
+      };
+    }
+  }
+
+  // 刪除提醒
+  async deleteReminder(reminderId, userId = 'default') {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const reminderRow = rows.find(row => 
+        row.get('id') === reminderId && row.get('user_id') === userId
+      );
+      
+      if (!reminderRow) {
+        return {
+          success: false,
+          error: '找不到指定的提醒'
+        };
+      }
+
+      // 標記為已刪除而不是實際刪除行
+      reminderRow.set('status', 'deleted');
+      await reminderRow.save();
+
+      console.log('✅ 提醒刪除成功:', reminderId);
+      return {
+        success: true,
+        message: '提醒已刪除'
+      };
+
+    } catch (error) {
+      console.error('刪除提醒錯誤:', error);
+      return {
+        success: false,
+        error: '刪除提醒失敗'
+      };
+    }
+  }
+
+  // 更新提醒的下次觸發時間（用於排程處理後）
+  async updateNextTrigger(reminder) {
+    try {
+      if (reminder.type === 'once') {
+        // 一次性提醒完成後設為 completed
+        reminder.row.set('status', 'completed');
+      } else {
+        // 重複提醒計算下次觸發時間
+        const currentDateTime = new Date(reminder.datetime);
+        const nextTrigger = this.calculateNextTrigger(currentDateTime, reminder.type, reminder.pattern);
+        reminder.row.set('next_trigger', nextTrigger.toISOString());
+      }
+      
+      await reminder.row.save();
+      console.log('✅ 提醒觸發時間更新成功:', reminder.id);
+      
+    } catch (error) {
+      console.error('更新提醒觸發時間錯誤:', error);
+    }
+  }
+
+  // 獲取提醒統計資訊
+  async getReminderStats(userId = 'default') {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const userRows = rows.filter(row => row.get('user_id') === userId);
+      
+      const stats = {
+        total: userRows.length,
+        active: userRows.filter(row => row.get('status') === 'active').length,
+        completed: userRows.filter(row => row.get('status') === 'completed').length,
+        deleted: userRows.filter(row => row.get('status') === 'deleted').length,
+        byType: {
+          once: userRows.filter(row => row.get('type') === 'once').length,
+          daily: userRows.filter(row => row.get('type') === 'daily').length,
+          weekly: userRows.filter(row => row.get('type') === 'weekly').length,
+          monthly: userRows.filter(row => row.get('type') === 'monthly').length,
+          custom: userRows.filter(row => row.get('type') === 'custom').length
+        }
+      };
+
+      return stats;
+
+    } catch (error) {
+      console.error('獲取提醒統計錯誤:', error);
+      return null;
+    }
+  }
+
+  // 清理已完成的舊提醒（可選的維護功能）
+  async cleanupOldReminders(daysOld = 30) {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+      
+      let deletedCount = 0;
+      
+      for (const row of rows) {
+        const status = row.get('status');
+        const createdAt = new Date(row.get('created_at'));
+        
+        if ((status === 'completed' || status === 'deleted') && createdAt < cutoffDate) {
+          await row.delete();
+          deletedCount++;
+        }
+      }
+
+      console.log(`✅ 清理了 ${deletedCount} 個舊提醒`);
+      return {
+        success: true,
+        deletedCount: deletedCount
+      };
+
+    } catch (error) {
+      console.error('清理舊提醒錯誤:', error);
+      return {
+        success: false,
+        error: '清理舊提醒失敗'
+      };
+    }
+  }
+
+  // 搜索提醒
+  async searchReminders(query, userId = 'default') {
+    try {
+      const activeReminders = await this.getActiveReminders(userId);
+      
+      const results = activeReminders.filter(reminder => {
+        const title = reminder.title.toLowerCase();
+        const description = reminder.description.toLowerCase();
+        const searchQuery = query.toLowerCase();
+        
+        return title.includes(searchQuery) || description.includes(searchQuery);
+      });
+
+      return results;
+
+    } catch (error) {
+      console.error('搜索提醒錯誤:', error);
+      return [];
+    }
+  }
+
+  // 獲取即將到來的提醒（未來24小時內）
+  async getUpcomingReminders(userId = 'default', hoursAhead = 24) {
+    try {
+      const now = new Date();
+      const futureTime = new Date(now.getTime() + (hoursAhead * 60 * 60 * 1000));
+      
+      const activeReminders = await this.getActiveReminders(userId);
+      
+      const upcomingReminders = activeReminders.filter(reminder => {
+        const triggerTime = new Date(reminder.next_trigger);
+        return triggerTime >= now && triggerTime <= futureTime;
+      });
+
+      return upcomingReminders;
+
+    } catch (error) {
+      console.error('獲取即將到來的提醒錯誤:', error);
+      return [];
+    }
+  }
+
+  // 驗證提醒資料
+  validateReminderData(data) {
+    const errors = [];
+
+    if (!data.title || data.title.trim().length === 0) {
+      errors.push('標題不能為空');
+    }
+
+    if (data.title && data.title.length > 100) {
+      errors.push('標題長度不能超過100字符');
+    }
+
+    if (data.description && data.description.length > 500) {
+      errors.push('描述長度不能超過500字符');
+    }
+
+    const validTypes = ['once', 'daily', 'weekly', 'monthly', 'custom'];
+    if (data.type && !validTypes.includes(data.type)) {
+      errors.push('無效的提醒類型');
+    }
+
+    if (data.datetime) {
+      const datetime = new Date(data.datetime);
+      if (isNaN(datetime.getTime())) {
+        errors.push('無效的日期時間格式');
+      } else if (datetime < new Date()) {
+        errors.push('提醒時間不能早於當前時間');
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors: errors
+    };
+  }
+
+  // 格式化提醒資料供顯示用
+  formatReminderForDisplay(reminder, language = 'zh') {
+    const datetime = new Date(reminder.datetime);
+    const formattedTime = datetime.toLocaleString(
+      language === 'ja' ? 'ja-JP' : 'zh-TW',
+      { 
+        timeZone: 'Asia/Taipei',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      }
+    );
+
+    const typeLabels = {
+      once: language === 'ja' ? '一回限り' : '一次性',
+      daily: language === 'ja' ? '毎日' : '每日',
+      weekly: language === 'ja' ? '毎週' : '每週',
+      monthly: language === 'ja' ? '毎月' : '每月',
+      custom: language === 'ja' ? 'カスタム' : '自定義'
+    };
+
+    return {
+      ...reminder,
+      formattedTime: formattedTime,
+      typeLabel: typeLabels[reminder.type] || reminder.type
+    };
+  }
+}
+
+module.exports = ReminderService;
