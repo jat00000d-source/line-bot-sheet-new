@@ -915,7 +915,7 @@ function getHelpMessage(language = 'zh') {
   }
 }
 
-}); // 健康檢查路由の終了
+// 健康檢查路由の終了
 
 // 伺服器啟動
 app.listen(port, () => {
@@ -928,4 +928,3 @@ app.listen(port, () => {
   console.log('- 預算超支警告');
   console.log('- 記帳後即時顯示剩餘預算');
 });
-
