@@ -12,7 +12,7 @@ class GoogleSheetsService {
 
   // 記帳相關的 Google Sheet 操作
   async getExpenseSheet() {
-    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, this.serviceAccountAuth);
+    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, this.serviceAccountAuth);
     await doc.loadInfo();
     return doc.sheetsByTitle[process.env.GOOGLE_SHEET_NAME] || doc.sheetsByIndex[0];
   }
