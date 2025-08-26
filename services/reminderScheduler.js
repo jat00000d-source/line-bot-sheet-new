@@ -96,7 +96,7 @@ module.exports = ReminderScheduler;
 // ========================================
 
 // parsers/dateTimeParser.js - 日期時間解析器
-const moment = require('moment-timezone');
+// 注意：删除了重复的 const moment = require('moment-timezone');
 
 class DateTimeParser {
   constructor() {
