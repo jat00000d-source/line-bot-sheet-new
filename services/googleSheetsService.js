@@ -1,221 +1,149 @@
-const { google } = require('googleapis');
+const { GoogleSpreadsheet } = require('google-spreadsheet');
+const { JWT } = require('google-auth-library');
 
 class GoogleSheetsService {
-    constructor() {
-        this.sheets = null;
-        this.spreadsheetId = process.env.GOOGLE_SHEET_ID;
-        this.initializeAuth();
+  constructor() {
+    this.serviceAccountAuth = new JWT({
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+  }
+
+  // 記帳相關的 Google Sheet 操作
+  async getExpenseSheet() {
+    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, this.serviceAccountAuth);
+    await doc.loadInfo();
+    return doc.sheetsByTitle[process.env.GOOGLE_SHEET_NAME] || doc.sheetsByIndex[0];
+  }
+
+  async addExpenseRecord(data) {
+    try {
+      const sheet = await this.getExpenseSheet();
+      await sheet.addRow(data);
+      return { success: true };
+    } catch (error) {
+      console.error('Error adding expense record:', error);
+      return { success: false, error: error.message };
     }
+  }
 
-    async initializeAuth() {
-        try {
-            const auth = new google.auth.GoogleAuth({
-                credentials: {
-                    type: "service_account",
-                    project_id: process.env.GOOGLE_PROJECT_ID,
-                    private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
-                    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-                    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-                    client_id: process.env.GOOGLE_CLIENT_ID,
-                    auth_uri: "https://accounts.google.com/o/oauth2/auth",
-                    token_uri: "https://oauth2.googleapis.com/token",
-                },
-                scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-            });
+  // 提醒相關的 Google Sheet 操作
+  async getRemindersSheet() {
+    const doc = new GoogleSpreadsheet(process.env.REMINDERS_SHEET_ID, this.serviceAccountAuth);
+    await doc.loadInfo();
+    return doc.sheetsByTitle[process.env.REMINDERS_SHEET_NAME] || doc.sheetsByIndex[0];
+  }
 
-            this.sheets = google.sheets({ version: 'v4', auth });
-            console.log('✅ Google Sheets Service initialized');
-        } catch (error) {
-            console.error('❌ Failed to initialize Google Sheets:', error.message);
-            throw error;
-        }
+  async addReminder(reminderData) {
+    try {
+      const sheet = await this.getRemindersSheet();
+      await sheet.addRow({
+        id: reminderData.id,
+        userId: reminderData.userId,
+        title: reminderData.title,
+        description: reminderData.description,
+        reminderTime: reminderData.reminderTime.toISOString(),
+        type: reminderData.type,
+        interval: reminderData.interval,
+        isActive: reminderData.isActive,
+        createdAt: new Date().toISOString(),
+        location: reminderData.location || ''
+      });
+      return { success: true };
+    } catch (error) {
+      console.error('Error adding reminder:', error);
+      return { success: false, error: error.message };
     }
+  }
 
-    // 記帳相關方法
-    async addAccountingRecord(data) {
-        const sheetName = '記帳'; // 你的記帳工作表名稱
-        return this.appendRow(sheetName, data);
+  async getReminders(userId) {
+    try {
+      const sheet = await this.getRemindersSheet();
+      const rows = await sheet.getRows();
+      return rows
+        .filter(row => row.get('userId') === userId && row.get('isActive') === 'true')
+        .map(row => ({
+          id: row.get('id'),
+          userId: row.get('userId'),
+          title: row.get('title'),
+          description: row.get('description'),
+          reminderTime: new Date(row.get('reminderTime')),
+          type: row.get('type'),
+          interval: row.get('interval'),
+          isActive: row.get('isActive') === 'true',
+          location: row.get('location')
+        }));
+    } catch (error) {
+      console.error('Error getting reminders:', error);
+      return [];
     }
+  }
 
-    async getAccountingRecords(range = 'A:F') {
-        const sheetName = '記帳';
-        return this.getRows(sheetName, range);
-    }
-
-    // 提醒相關方法
-    async addReminder(reminderData) {
-        const sheetName = '提醒'; // 新的提醒工作表
-        await this.ensureSheetExists(sheetName);
-        return this.appendRow(sheetName, reminderData);
-    }
-
-    async getReminders(range = 'A:J') {
-        const sheetName = '提醒';
-        await this.ensureSheetExists(sheetName);
-        return this.getRows(sheetName, range);
-    }
-
-    async updateReminder(rowIndex, reminderData) {
-        const sheetName = '提醒';
-        return this.updateRow(sheetName, rowIndex, reminderData);
-    }
-
-    async deleteReminder(rowIndex) {
-        const sheetName = '提醒';
-        return this.deleteRow(sheetName, rowIndex);
-    }
-
-    // 基礎 CRUD 操作
-    async appendRow(sheetName, values) {
-        try {
-            const request = {
-                spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A:A`,
-                valueInputOption: 'USER_ENTERED',
-                resource: { values: [values] }
-            };
-
-            const response = await this.sheets.spreadsheets.values.append(request);
-            console.log(`✅ Added row to ${sheetName}:`, values);
-            return response.data;
-        } catch (error) {
-            console.error(`❌ Failed to append row to ${sheetName}:`, error.message);
-            throw error;
-        }
-    }
-
-    async getRows(sheetName, range) {
-        try {
-            const response = await this.sheets.spreadsheets.values.get({
-                spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!${range}`,
-            });
-
-            return response.data.values || [];
-        } catch (error) {
-            console.error(`❌ Failed to get rows from ${sheetName}:`, error.message);
-            return [];
-        }
-    }
-
-    async updateRow(sheetName, rowIndex, values) {
-        try {
-            const response = await this.sheets.spreadsheets.values.update({
-                spreadsheetId: this.spreadsheetId,
-                range: `${sheetName}!A${rowIndex}:J${rowIndex}`,
-                valueInputOption: 'USER_ENTERED',
-                resource: { values: [values] }
-            });
-
-            console.log(`✅ Updated row ${rowIndex} in ${sheetName}`);
-            return response.data;
-        } catch (error) {
-            console.error(`❌ Failed to update row in ${sheetName}:`, error.message);
-            throw error;
-        }
-    }
-
-    async deleteRow(sheetName, rowIndex) {
-        try {
-            // Google Sheets API 不直接支援刪除行，我們用清空資料的方式
-            const emptyValues = ['', '', '', '', '', '', '', '', '', ''];
-            return this.updateRow(sheetName, rowIndex, emptyValues);
-        } catch (error) {
-            console.error(`❌ Failed to delete row from ${sheetName}:`, error.message);
-            throw error;
-        }
-    }
-
-    // 確保工作表存在
-    async ensureSheetExists(sheetName) {
-        try {
-            const spreadsheet = await this.sheets.spreadsheets.get({
-                spreadsheetId: this.spreadsheetId
-            });
-
-            const sheetExists = spreadsheet.data.sheets.some(
-                sheet => sheet.properties.title === sheetName
-            );
-
-            if (!sheetExists) {
-                await this.createSheet(sheetName);
-            }
-        } catch (error) {
-            console.error(`❌ Failed to check/create sheet ${sheetName}:`, error.message);
-            throw error;
-        }
-    }
-
-    async createSheet(sheetName) {
-        try {
-            const request = {
-                spreadsheetId: this.spreadsheetId,
-                resource: {
-                    requests: [{
-                        addSheet: {
-                            properties: { title: sheetName }
-                        }
-                    }]
-                }
-            };
-
-            await this.sheets.spreadsheets.batchUpdate(request);
-
-            // 如果是提醒工作表，添加標題行
-            if (sheetName === '提醒') {
-                const headers = [
-                    'ID', '用戶ID', '提醒內容', '提醒時間', '重複類型', 
-                    '狀態', '創建時間', '位置', '語言', '備註'
-                ];
-                await this.appendRow(sheetName, headers);
-            }
-
-            console.log(`✅ Created new sheet: ${sheetName}`);
-        } catch (error) {
-            console.error(`❌ Failed to create sheet ${sheetName}:`, error.message);
-            throw error;
-        }
-    }
-
-    // 搜尋功能
-    async searchReminders(userId, query = '') {
-        const allReminders = await this.getReminders();
-        return allReminders.filter(reminder => {
-            const [id, uid, content, time, type, status] = reminder;
-            return uid === userId && 
-                   (query === '' || content.includes(query) || time.includes(query));
+  async updateReminder(reminderId, updateData) {
+    try {
+      const sheet = await this.getRemindersSheet();
+      const rows = await sheet.getRows();
+      const reminderRow = rows.find(row => row.get('id') === reminderId);
+      
+      if (reminderRow) {
+        Object.keys(updateData).forEach(key => {
+          if (key === 'reminderTime' && updateData[key] instanceof Date) {
+            reminderRow.set(key, updateData[key].toISOString());
+          } else {
+            reminderRow.set(key, updateData[key]);
+          }
         });
+        await reminderRow.save();
+        return { success: true };
+      }
+      return { success: false, error: 'Reminder not found' };
+    } catch (error) {
+      console.error('Error updating reminder:', error);
+      return { success: false, error: error.message };
     }
+  }
 
-    // 獲取即將到期的提醒
-    async getUpcomingReminders(timeframe = 60) { // 預設60分鐘內
-        const allReminders = await this.getReminders();
-        const now = new Date();
-        const futureTime = new Date(now.getTime() + timeframe * 60000);
-
-        return allReminders.filter(reminder => {
-            const [id, userId, content, reminderTime, repeatType, status] = reminder;
-            
-            if (status !== '啟用') return false;
-
-            try {
-                const reminderDate = new Date(reminderTime);
-                return reminderDate >= now && reminderDate <= futureTime;
-            } catch (error) {
-                return false;
-            }
-        });
+  async deleteReminder(reminderId) {
+    try {
+      const sheet = await this.getRemindersSheet();
+      const rows = await sheet.getRows();
+      const reminderRow = rows.find(row => row.get('id') === reminderId);
+      
+      if (reminderRow) {
+        reminderRow.set('isActive', 'false');
+        await reminderRow.save();
+        return { success: true };
+      }
+      return { success: false, error: 'Reminder not found' };
+    } catch (error) {
+      console.error('Error deleting reminder:', error);
+      return { success: false, error: error.message };
     }
+  }
+
+  async getAllActiveReminders() {
+    try {
+      const sheet = await this.getRemindersSheet();
+      const rows = await sheet.getRows();
+      return rows
+        .filter(row => row.get('isActive') === 'true')
+        .map(row => ({
+          id: row.get('id'),
+          userId: row.get('userId'),
+          title: row.get('title'),
+          description: row.get('description'),
+          reminderTime: new Date(row.get('reminderTime')),
+          type: row.get('type'),
+          interval: row.get('interval'),
+          isActive: row.get('isActive') === 'true',
+          location: row.get('location')
+        }));
+    } catch (error) {
+      console.error('Error getting all active reminders:', error);
+      return [];
+    }
+  }
 }
 
-// 單例模式
-let instance = null;
-
-function getGoogleSheetsService() {
-    if (!instance) {
-        instance = new GoogleSheetsService();
-    }
-    return instance;
-}
-
-module.exports = { GoogleSheetsService, getGoogleSheetsService };
+module.exports = GoogleSheetsService;
