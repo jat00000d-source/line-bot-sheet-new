@@ -1,5 +1,5 @@
 const Todo = require('../models/Todo');
-const { TODO_MESSAGES, SHEET_CONFIG } = require('../constants/todoMessages');
+const { TODO_MESSAGES, SHEET_CONFIG } = require('../constants/todoMessage');
 
 class TodoService {
     constructor(googleSheetsService) {
