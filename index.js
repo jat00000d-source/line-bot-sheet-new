@@ -256,10 +256,26 @@ class LineBotApp {
       const { ExpenseController, TodoController } = require('./controllers/expenseController');
       this.expenseController = new ExpenseController();
       this.todoController = new TodoController();
+      
+      // 初始化服務
+      try {
+        const ReminderScheduler = require('./services/reminderScheduler');
+        const NotificationService = require('./services/notificationService');
+        
+        this.reminderScheduler = new ReminderScheduler(this.client);
+        this.notificationService = new NotificationService(this.client);
+        
+        // 讓 ReminderScheduler 可以存取提醒資料
+        this.reminderScheduler.setReminders(this.todoController.reminders);
+        console.log('✅ 成功載入服務模組');
+      } catch (serviceError) {
+        console.log('⚠️ 服務模組載入失敗:', serviceError.message);
+      }
+      
       console.log('✅ 成功載入外部控制器');
     } catch (error) {
       // 如果外部控制器載入失敗，使用基本版本
-      console.log('⚠️ 外部控制器載入失敗，使用基本版本');
+      console.log('⚠️ 外部控制器載入失敗，使用基本版本:', error.message);
       this.expenseController = new BasicExpenseController();
       this.todoController = new BasicTodoController();
     }
@@ -272,7 +288,7 @@ class LineBotApp {
       console.log('✅ 成功載入外部工具類');
     } catch (error) {
       // 如果外部工具類載入失敗，使用基本版本
-      console.log('⚠️ 外部工具類載入失敗，使用基本版本');
+      console.log('⚠️ 外部工具類載入失敗，使用基本版本:', error.message);
       this.commandParser = new BasicCommandParser();
       this.languageDetector = new BasicLanguageDetector();
     }
@@ -549,9 +565,20 @@ class LineBotApp {
   startScheduler() {
     try {
       // 設定日本時間的 cron job，每分鐘檢查提醒
-      cron.schedule('* * * * *', () => {
-        const now = moment().tz('Asia/Tokyo');
-        console.log(`⏰ [${now.format('YYYY-MM-DD HH:mm:ss JST')}] 定時檢查...`);
+      cron.schedule('* * * * *', async () => {
+        try {
+          const now = moment().tz('Asia/Tokyo');
+          console.log(`⏰ [${now.format('YYYY-MM-DD HH:mm:ss JST')}] 檢查提醒中...`);
+          
+          // 如果有 reminderScheduler，執行檢查
+          if (this.reminderScheduler && typeof this.reminderScheduler.checkAndSendReminders === 'function') {
+            await this.reminderScheduler.checkAndSendReminders();
+          } else {
+            console.log('⏰ ReminderScheduler 不可用，跳過提醒檢查');
+          }
+        } catch (error) {
+          console.error('❌ 排程器錯誤:', error);
+        }
       }, {
         timezone: 'Asia/Tokyo'
       });
@@ -579,6 +606,14 @@ class LineBotApp {
       console.log('\n🔧 環境變數狀態:');
       console.log(`   CHANNEL_ACCESS_TOKEN: ${process.env.CHANNEL_ACCESS_TOKEN ? '✅ 已設定' : '❌ 未設定'}`);
       console.log(`   CHANNEL_SECRET: ${process.env.CHANNEL_SECRET ? '✅ 已設定' : '❌ 未設定'}`);
+      console.log(`   GOOGLE_SHEET_ID: ${process.env.GOOGLE_SHEET_ID ? '✅ 已設定' : '❌ 未設定'}`);
+      console.log(`   REMINDERS_SHEET_ID: ${process.env.REMINDERS_SHEET_ID ? '✅ 已設定' : '❌ 未設定'}`);
+      
+      console.log('\n🔧 控制器狀態:');
+      console.log(`   ExpenseController: ${this.expenseController.constructor.name}`);
+      console.log(`   TodoController: ${this.todoController.constructor.name}`);
+      console.log(`   CommandParser: ${this.commandParser.constructor.name}`);
+      console.log(`   LanguageDetector: ${this.languageDetector.constructor.name}`);
       
       console.log('\n✅ 伺服器準備就緒，等待請求...\n');
     });
