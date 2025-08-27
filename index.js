@@ -837,8 +837,9 @@ class GoogleSheetsReminderController {
           text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
         };
       } else {
-        try {
-  const deleted = await deleteReminder(id); // 這裡是你實際刪除提醒的函式
+      try {
+  // 這行是你真正執行刪除的函式；若它就是外層同名方法，請改名成 deleteReminderFromDB 之類以免遞迴
+  const deleted = await deleteReminder(id);
 
   if (deleted) {
     return {
@@ -855,16 +856,13 @@ class GoogleSheetsReminderController {
   console.error('刪除提醒錯誤:', error);
   return {
     type: 'text',
-    text: language === 'ja' ? '削除中にエラーが発生しました。' : '刪除提醒時發生錯誤。'
+    text: language === 'ja'
+      ? `リマインダー削除時にエラーが発生しました: ${error.message}`
+      : `刪除提醒時發生錯誤: ${error.message}`
   };
 }
+}, // 方法之間的逗號，下一個 parseReminderCommand 會從這行後面開始
 
-    return {
-      type: 'text',
-      text: language === 'ja' ? `リマインダー削除時にエラーが発生しました: ${error.message}` : `刪除提醒時發生錯誤: ${error.message}`
-    };
-  }
-}, // <- 正確的分隔
 
 parseReminderCommand(text) {
   const now = moment().tz('Asia/Tokyo');
