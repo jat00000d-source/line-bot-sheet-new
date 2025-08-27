@@ -837,7 +837,7 @@ app.start();
 module.exports = LineBotApp;
 require('dotenv').config();
 ;
-
+const moment = require('moment-timezone');
 // 設定預設時區為日本時間
 moment.tz.setDefault('Asia/Tokyo');
 
