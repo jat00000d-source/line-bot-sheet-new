@@ -324,32 +324,59 @@ class LineBotApp {
   }
 
   setupRoutes() {
+    // 測試專用的 Webhook 端點（不需要驗證）
+    this.app.post('/webhook-test', async (req, res) => {
+      console.log('🧪 測試 Webhook 端點被調用');
+      console.log('請求標頭:', req.headers);
+      console.log('請求內容:', JSON.stringify(req.body, null, 2));
+      
+      res.status(200).json({ 
+        message: 'Test webhook OK',
+        timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
+      });
+    });
+
     // LINE Webhook
-    this.app.post('/webhook', line.middleware(this.config), async (req, res) => {
+    this.app.post('/webhook', async (req, res) => {
       try {
         console.log('📨 收到 Webhook 請求');
+        console.log('請求標頭:', JSON.stringify(req.headers, null, 2));
+        console.log('請求內容:', JSON.stringify(req.body, null, 2));
+        
+        // 先回應 200 狀態碼，避免超時
+        res.status(200).json({ message: 'OK' });
         
         if (!req.body || !req.body.events) {
           console.log('⚠️ 無效的請求內容');
-          return res.status(400).json({ error: 'Invalid request body' });
+          return;
         }
 
-        const results = await Promise.allSettled(
-          req.body.events.map(event => this.handleEvent(event))
-        );
-        
-        // 檢查是否有失敗的事件處理
-        const failed = results.filter(r => r.status === 'rejected');
-        if (failed.length > 0) {
-          console.error('❌ 部分事件處理失敗:', failed.map(f => f.reason));
-        }
-        
-        console.log('✅ Webhook 處理完成:', results.length, '個事件');
-        res.status(200).json({ message: 'OK', processed: results.length });
+        // 異步處理事件，避免阻塞回應
+        setImmediate(async () => {
+          try {
+            const results = await Promise.allSettled(
+              req.body.events.map(event => this.handleEvent(event))
+            );
+            
+            // 檢查是否有失敗的事件處理
+            const failed = results.filter(r => r.status === 'rejected');
+            if (failed.length > 0) {
+              console.error('❌ 部分事件處理失敗:', failed.map(f => f.reason));
+            }
+            
+            console.log('✅ Webhook 處理完成:', results.length, '個事件');
+          } catch (asyncErr) {
+            console.error('❌ 異步事件處理錯誤:', asyncErr);
+          }
+        });
         
       } catch (err) {
         console.error('❌ Webhook 錯誤:', err);
-        res.status(500).json({ error: 'Internal Server Error' });
+        console.error('錯誤堆疊:', err.stack);
+        
+        if (!res.headersSent) {
+          res.status(200).json({ message: 'Error handled' });
+        }
       }
     });
 
@@ -366,11 +393,48 @@ class LineBotApp {
         }
       });
     });
+
+    // 模擬 LINE 事件的測試端點
+    this.app.post('/test-event', async (req, res) => {
+      try {
+        const testEvent = {
+          type: 'message',
+          message: {
+            type: 'text',
+            text: req.body.message || '測試訊息'
+          },
+          source: {
+            userId: 'test-user-id'
+          },
+          replyToken: 'test-reply-token'
+        };
+
+        console.log('🧪 處理測試事件:', testEvent);
+        
+        const result = await this.handleEvent(testEvent);
+        
+        res.status(200).json({
+          success: true,
+          message: '測試事件處理完成',
+          result: result,
+          timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
+        });
+        
+      } catch (error) {
+        console.error('❌ 測試事件處理錯誤:', error);
+        res.status(200).json({
+          success: false,
+          error: error.message,
+          timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
+        });
+      }
+    });
   }
 
   async handleEvent(event) {
     try {
       console.log('🎯 處理事件類型:', event.type);
+      console.log('🎯 完整事件內容:', JSON.stringify(event, null, 2));
       
       if (event.type !== 'message' || event.message.type !== 'text') {
         console.log('⏭️ 跳過非文字訊息事件');
@@ -389,7 +453,7 @@ class LineBotApp {
       
       // 解析指令
       const command = this.commandParser.parseCommand(messageText, language);
-      console.log(`🔧 解析的指令:`, command);
+      console.log(`🔧 解析的指令:`, JSON.stringify(command, null, 2));
       
       let response;
       
@@ -426,11 +490,22 @@ class LineBotApp {
           break;
       }
 
-      console.log('📤 準備回應:', response);
+      console.log('📤 準備回應:', JSON.stringify(response, null, 2));
+
+      // 如果是測試事件，不要真的發送訊息
+      if (event.replyToken === 'test-reply-token') {
+        console.log('🧪 這是測試事件，跳過實際發送');
+        return response;
+      }
 
       if (response && event.replyToken) {
-        await this.client.replyMessage(event.replyToken, response);
-        console.log('✅ 成功傳送回應');
+        try {
+          await this.client.replyMessage(event.replyToken, response);
+          console.log('✅ 成功傳送回應');
+        } catch (replyError) {
+          console.error('❌ 傳送回應失敗:', replyError);
+          console.error('回應內容:', JSON.stringify(response, null, 2));
+        }
         return response;
       }
       
@@ -439,9 +514,10 @@ class LineBotApp {
     } catch (error) {
       console.error('❌ 處理事件時發生錯誤:', error);
       console.error('錯誤堆疊:', error.stack);
+      console.error('事件內容:', JSON.stringify(event, null, 2));
       
       // 嘗試傳送錯誤訊息
-      if (event.replyToken) {
+      if (event.replyToken && event.replyToken !== 'test-reply-token') {
         try {
           const errorMessage = {
             type: 'text',
@@ -449,12 +525,13 @@ class LineBotApp {
           };
           
           await this.client.replyMessage(event.replyToken, errorMessage);
+          console.log('✅ 成功傳送錯誤訊息');
         } catch (replyError) {
           console.error('❌ 傳送錯誤訊息失敗:', replyError);
         }
       }
       
-      throw error; // 重新拋出錯誤以便 Promise.allSettled 捕獲
+      throw error; // 重新拋出錯誤以便記錄
     }
   }
 
