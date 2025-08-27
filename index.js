@@ -1341,7 +1341,10 @@ class GoogleSheetsReminderController {
         text: language === 'ja'
           ? `リマインダー削除時にエラーが発生しました: ${error.message}`
           : `刪除提醒時發生錯誤: ${error.message}`
-      };
+          };
     }
   }
-}
+}   // ✅ 關掉 class
+
+// 啟動應用
+const app = new LineBotApp();
