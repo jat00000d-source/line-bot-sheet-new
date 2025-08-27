@@ -908,7 +908,7 @@ class GoogleSheetsExpenseController {
   constructor() {
     this.doc = null;
   }
-
+  
   async getGoogleSheet() {
     if (!this.doc) {
       this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
@@ -916,7 +916,6 @@ class GoogleSheetsExpenseController {
     }
     return this.doc;
   }
-
   async handleExpense(event, command) {
     try {
       let { amount, category, description, dateOffset } = command;
