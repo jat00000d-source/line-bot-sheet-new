@@ -331,15 +331,6 @@ class LineBotApp {
     this.startScheduler();
   }
 
-
-// 必要的模組導入
-const express = require('express');
-const line = require('@line/bot-sdk');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { JWT } = require('google-auth-library');
-const cron = require('node-cron');
-const moment = require('moment-timezone');
-
 // 設定預設時區為日本時間
 moment.tz.setDefault('Asia/Tokyo');
 
