@@ -395,7 +395,7 @@ class GoogleSheetsReminderController {
   constructor(lineClient) {
     this.lineClient = lineClient;
     this.doc = null;
-    this.reminderSheetName = 'Reminders';
+    this.reminderSheetName = 'reminders'; // 使用你現有的工作表名稱
   }
 
   async getGoogleSheet() {
@@ -412,24 +412,25 @@ class GoogleSheetsReminderController {
       let sheet = doc.sheetsByTitle[this.reminderSheetName];
       
       if (!sheet) {
-        // 建立提醒工作表
-        sheet = await doc.addSheet({
-          title: this.reminderSheetName,
-          headerValues: [
-            'ID', 'UserID', '提醒內容', '提醒時間', '重複類型', 
-            '狀態', '建立時間', '最後執行時間', '下次執行時間'
-          ]
-        });
-
-        // 格式化標題列
-        await sheet.loadCells('A1:I1');
-        for (let i = 0; i < 9; i++) {
-          const cell = sheet.getCell(0, i);
-          cell.textFormat = { bold: true };
-          cell.backgroundColor = { red: 0.85, green: 0.92, blue: 0.83 };
-          cell.horizontalAlignment = 'CENTER';
+        console.log(`⚠️ 找不到工作表 '${this.reminderSheetName}'，請檢查 Google Sheets`);
+        // 如果找不到，嘗試尋找其他可能的名稱
+        const sheetNames = Object.keys(doc.sheetsByTitle);
+        console.log('可用的工作表:', sheetNames);
+        
+        // 尋找包含 reminder 相關關鍵字的工作表
+        const reminderSheet = sheetNames.find(name => 
+          name.toLowerCase().includes('reminder') || 
+          name.toLowerCase().includes('提醒') ||
+          name.toLowerCase().includes('リマインダー')
+        );
+        
+        if (reminderSheet) {
+          sheet = doc.sheetsByTitle[reminderSheet];
+          this.reminderSheetName = reminderSheet;
+          console.log(`✅ 找到提醒工作表: ${reminderSheet}`);
+        } else {
+          throw new Error('找不到提醒相關的工作表，請確認 Google Sheets 中有提醒工作表');
         }
-        await sheet.saveUpdatedCells();
       }
       
       return sheet;
@@ -452,18 +453,22 @@ class GoogleSheetsReminderController {
       // 計算下次執行時間
       const nextExecution = this.calculateNextExecution(reminderData.datetime, reminderData.recurring);
       
+      // 根據你的 Google Sheets 結構建立提醒資料
       const reminder = {
-        'ID': reminderId,
-        'UserID': event.source.userId,
-        '提醒內容': reminderData.content,
-        '提醒時間': reminderData.datetime.format('YYYY-MM-DD HH:mm'),
-        '重複類型': reminderData.recurring || '單次',
-        '狀態': '啟用',
-        '建立時間': now.format('YYYY-MM-DD HH:mm:ss'),
-        '最後執行時間': '',
-        '下次執行時間': nextExecution.format('YYYY-MM-DD HH:mm:ss')
+        'id': reminderId,
+        'title': reminderData.content,
+        'description': `用戶提醒: ${reminderData.content}`,
+        'type': reminderData.recurring || 'once',
+        'datetime': reminderData.datetime.format('YYYY-MM-DD HH:mm:ss'),
+        'pattern': reminderData.recurring || '',
+        'location': event.source.userId, // 使用 location 欄位儲存 userId
+        'language': language,
+        'status': 'active',
+        'created_at': now.format('YYYY-MM-DD HH:mm:ss'),
+        'next_trigger': nextExecution.format('YYYY-MM-DD HH:mm:ss')
       };
       
+      console.log('準備加入提醒資料:', reminder);
       await sheet.addRow(reminder);
       
       const message = language === 'ja' ? 
@@ -479,7 +484,7 @@ class GoogleSheetsReminderController {
       console.error('提醒處理錯誤:', error);
       return {
         type: 'text',
-        text: language === 'ja' ? 'リマインダー設定時にエラーが発生しました。' : '設定提醒時發生錯誤。'
+        text: language === 'ja' ? `リマインダー設定時にエラーが発生しました: ${error.message}` : `設定提醒時發生錯誤: ${error.message}`
       };
     }
   }
@@ -490,8 +495,8 @@ class GoogleSheetsReminderController {
       const rows = await sheet.getRows();
       
       const userReminders = rows.filter(row => 
-        row.get('UserID') === event.source.userId && 
-        row.get('狀態') === '啟用'
+        row.get('location') === event.source.userId && 
+        row.get('status') === 'active'
       );
       
       if (userReminders.length === 0) {
@@ -502,10 +507,11 @@ class GoogleSheetsReminderController {
       }
       
       const reminderList = userReminders.map((reminder, index) => {
-        const content = reminder.get('提醒內容');
-        const time = reminder.get('下次執行時間');
-        const recurring = reminder.get('重複類型');
-        return `${index + 1}. ${content}\n   ⏰ ${time}\n   🔄 ${recurring}`;
+        const title = reminder.get('title') || '提醒';
+        const nextTrigger = reminder.get('next_trigger') || '未設定';
+        const type = reminder.get('type') || 'once';
+        const typeDisplay = type === 'once' ? '單次' : type;
+        return `${index + 1}. ${title}\n   ⏰ ${nextTrigger}\n   🔄 ${typeDisplay}`;
       }).join('\n\n');
       
       const title = language === 'ja' ? '📋 リマインダー一覧:' : '📋 提醒列表:';
@@ -519,7 +525,7 @@ class GoogleSheetsReminderController {
       console.error('查詢提醒錯誤:', error);
       return {
         type: 'text',
-        text: language === 'ja' ? 'リマインダー取得時にエラーが発生しました。' : '查詢提醒時發生錯誤。'
+        text: language === 'ja' ? `リマインダー取得時にエラーが発生しました: ${error.message}` : `查詢提醒時發生錯誤: ${error.message}`
       };
     }
   }
@@ -530,16 +536,15 @@ class GoogleSheetsReminderController {
       const rows = await sheet.getRows();
       
       const userReminders = rows.filter(row => 
-        row.get('UserID') === event.source.userId && 
-        row.get('狀態') === '啟用'
+        row.get('location') === event.source.userId && 
+        row.get('status') === 'active'
       );
       
       const index = parseInt(command.index) - 1;
       
       if (index >= 0 && index < userReminders.length) {
         const reminderToDelete = userReminders[index];
-        reminderToDelete.set('狀態', '已刪除');
-        reminderToDelete.set('最後執行時間', moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss'));
+        reminderToDelete.set('status', 'deleted');
         await reminderToDelete.save();
         
         return {
@@ -557,7 +562,7 @@ class GoogleSheetsReminderController {
       console.error('刪除提醒錯誤:', error);
       return {
         type: 'text',
-        text: language === 'ja' ? 'リマインダー削除時にエラーが発生しました。' : '刪除提醒時發生錯誤。'
+        text: language === 'ja' ? `リマインダー削除時にエラーが発生しました: ${error.message}` : `刪除提醒時發生錯誤: ${error.message}`
       };
     }
   }
@@ -613,19 +618,19 @@ class GoogleSheetsReminderController {
     const recurringPatterns = [
       {
         pattern: /每天|毎日|daily/i,
-        value: '每天'
+        value: 'daily'
       },
       {
         pattern: /每週|毎週|週次|weekly/i,
-        value: '每週'
+        value: 'weekly'
       },
       {
         pattern: /每月|毎月|monthly/i,
-        value: '每月'
+        value: 'monthly'
       },
       {
         pattern: /每年|毎年|yearly/i,
-        value: '每年'
+        value: 'yearly'
       }
     ];
 
@@ -659,7 +664,7 @@ class GoogleSheetsReminderController {
   }
 
   calculateNextExecution(datetime, recurring) {
-    if (!recurring || recurring === '單次') {
+    if (!recurring || recurring === 'once') {
       return datetime;
     }
 
@@ -669,15 +674,19 @@ class GoogleSheetsReminderController {
     // 如果時間已經過了，計算下一次執行時間
     while (next.isBefore(now)) {
       switch (recurring) {
+        case 'daily':
         case '每天':
           next.add(1, 'day');
           break;
+        case 'weekly':
         case '每週':
           next.add(1, 'week');
           break;
+        case 'monthly':
         case '每月':
           next.add(1, 'month');
           break;
+        case 'yearly':
         case '每年':
           next.add(1, 'year');
           break;
@@ -695,13 +704,25 @@ class GoogleSheetsReminderController {
       const rows = await sheet.getRows();
       const now = moment().tz('Asia/Tokyo');
       
-      const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
+      console.log(`🔍 檢查 ${rows.length} 個提醒記錄...`);
+      
+      const activeReminders = rows.filter(row => row.get('status') === 'active');
+      console.log(`📋 找到 ${activeReminders.length} 個啟用中的提醒`);
       
       for (const reminder of activeReminders) {
-        const nextExecution = moment(reminder.get('下次執行時間'));
+        const nextTriggerStr = reminder.get('next_trigger');
+        if (!nextTriggerStr) {
+          console.log('⚠️ 跳過沒有 next_trigger 的提醒');
+          continue;
+        }
+        
+        const nextTrigger = moment.tz(nextTriggerStr, 'Asia/Tokyo');
         
         // 檢查是否到了執行時間（允許1分鐘的誤差）
-        if (now.isAfter(nextExecution.subtract(30, 'seconds')) && now.isBefore(nextExecution.add(90, 'seconds'))) {
+        if (now.isAfter(nextTrigger.clone().subtract(30, 'seconds')) && 
+            now.isBefore(nextTrigger.clone().add(90, 'seconds'))) {
+          
+          console.log(`🔔 執行提醒: ${reminder.get('title')}`);
           await this.sendReminder(reminder);
           await this.updateReminderAfterExecution(reminder, now);
         }
@@ -714,17 +735,17 @@ class GoogleSheetsReminderController {
 
   async sendReminder(reminder) {
     try {
-      const userId = reminder.get('UserID');
-      const content = reminder.get('提醒內容');
-      const recurring = reminder.get('重複類型');
+      const userId = reminder.get('location'); // 使用 location 欄位作為 userId
+      const title = reminder.get('title');
+      const type = reminder.get('type');
       
       const message = {
         type: 'text',
-        text: `⏰ 提醒時間到了！\n\n📝 ${content}\n\n${recurring !== '單次' ? `🔄 這是${recurring}提醒` : ''}`
+        text: `⏰ 提醒時間到了！\n\n📝 ${title}\n\n${type !== 'once' ? `🔄 這是${type}提醒` : ''}`
       };
       
       await this.lineClient.pushMessage(userId, message);
-      console.log(`✅ 已發送提醒給用戶 ${userId}: ${content}`);
+      console.log(`✅ 已發送提醒給用戶 ${userId}: ${title}`);
       
     } catch (error) {
       console.error('發送提醒錯誤:', error);
@@ -733,18 +754,18 @@ class GoogleSheetsReminderController {
 
   async updateReminderAfterExecution(reminder, executionTime) {
     try {
-      const recurring = reminder.get('重複類型');
+      const type = reminder.get('type');
       
-      reminder.set('最後執行時間', executionTime.format('YYYY-MM-DD HH:mm:ss'));
-      
-      if (recurring && recurring !== '單次') {
-        // 計算下次執行時間
-        const currentNext = moment(reminder.get('下次執行時間'));
-        const nextExecution = this.calculateNextExecution(currentNext, recurring);
-        reminder.set('下次執行時間', nextExecution.format('YYYY-MM-DD HH:mm:ss'));
+      if (type && type !== 'once') {
+        // 重複提醒，計算下次執行時間
+        const currentNext = moment.tz(reminder.get('next_trigger'), 'Asia/Tokyo');
+        const nextExecution = this.calculateNextExecution(currentNext, type);
+        reminder.set('next_trigger', nextExecution.format('YYYY-MM-DD HH:mm:ss'));
+        console.log(`🔄 更新重複提醒的下次執行時間: ${nextExecution.format('YYYY-MM-DD HH:mm:ss')}`);
       } else {
         // 單次提醒，執行後停用
-        reminder.set('狀態', '已完成');
+        reminder.set('status', 'completed');
+        console.log('✅ 單次提醒已完成，狀態設為 completed');
       }
       
       await reminder.save();
