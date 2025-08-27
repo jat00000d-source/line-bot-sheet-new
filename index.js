@@ -41,7 +41,7 @@ class EnhancedCommandParser {
       '一昨日': -2
     };
   }
-
+  
   parseCommand(text, language = 'zh') {
     const lowerText = text.toLowerCase();
     
