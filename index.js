@@ -67,7 +67,11 @@ const COMMAND_MAPPING = {
   '残額': 'remaining',
   'リマインダー': 'reminder',
   'リマインダー一覧': 'query_reminders',
-  'リマインダー削除': 'delete_reminder'
+  'リマインダー削除': 'delete_reminder',
+  
+  // 測試指令
+  'test': 'test',
+  'テスト': 'test'
 };
 
 const CATEGORY_MAPPING = {
@@ -122,61 +126,74 @@ class EnhancedCommandParser {
   }
   
   parseCommand(text, language = 'zh') {
-    const lowerText = text.toLowerCase();
-    
-    // 檢查特殊指令
-    const commandType = COMMAND_MAPPING[text.trim()];
-    if (commandType) {
-      return { type: commandType };
-    }
-    
-    // 檢查預算設定
-    if (this.isBudgetSetting(text)) {
-      const budgetMatch = text.match(/(\d+)/);
-      if (budgetMatch) {
-        return {
-          type: 'set_budget',
-          amount: parseInt(budgetMatch[1])
-        };
+    try {
+      const lowerText = text.toLowerCase();
+      console.log(`🔍 解析命令: "${text}", 語言: ${language}`);
+      
+      // 檢查特殊指令
+      const commandType = COMMAND_MAPPING[text.trim()];
+      if (commandType) {
+        console.log(`✅ 找到特殊指令: ${commandType}`);
+        return { type: commandType };
       }
-    }
-    
-    // 記帳相關命令
-    if (lowerText.includes('支出') || lowerText.includes('查看') || lowerText.includes('統計') || lowerText.includes('集計') || lowerText.includes('まとめ')) {
-      return { type: 'query_expenses' };
-    }
-    
-    // 提醒相關命令 - 增強解析
-    if (this.isReminderCommand(text)) {
-      if (lowerText.includes('查看') || lowerText.includes('列表') || lowerText.includes('一覧') || lowerText.includes('リスト')) {
-        return { type: 'query_reminders' };
+      
+      // 檢查預算設定
+      if (this.isBudgetSetting(text)) {
+        const budgetMatch = text.match(/(\d+)/);
+        if (budgetMatch) {
+          console.log(`✅ 預算設定: ${budgetMatch[1]}`);
+          return {
+            type: 'set_budget',
+            amount: parseInt(budgetMatch[1])
+          };
+        }
       }
-      if (lowerText.includes('刪除') || lowerText.includes('削除') || lowerText.includes('delete')) {
-        const match = text.match(/(\d+)/);
+      
+      // 記帳相關命令
+      if (lowerText.includes('支出') || lowerText.includes('查看') || lowerText.includes('統計') || lowerText.includes('集計') || lowerText.includes('まとめ')) {
+        console.log(`✅ 查詢支出指令`);
+        return { type: 'query_expenses' };
+      }
+      
+      // 提醒相關命令 - 增強解析
+      if (this.isReminderCommand(text)) {
+        console.log(`✅ 提醒相關指令`);
+        if (lowerText.includes('查看') || lowerText.includes('列表') || lowerText.includes('一覧') || lowerText.includes('リスト')) {
+          return { type: 'query_reminders' };
+        }
+        if (lowerText.includes('刪除') || lowerText.includes('削除') || lowerText.includes('delete')) {
+          const match = text.match(/(\d+)/);
+          return { 
+            type: 'delete_reminder',
+            index: match ? match[1] : '1'
+          };
+        }
         return { 
-          type: 'delete_reminder',
-          index: match ? match[1] : '1'
+          type: 'reminder',
+          reminder: text
         };
       }
-      return { 
-        type: 'reminder',
-        reminder: text
-      };
+      
+      // 解析記帳資料
+      const expenseData = this.parseExpenseData(text, language);
+      if (expenseData.success) {
+        console.log(`✅ 記帳資料解析成功:`, expenseData);
+        return {
+          type: 'expense',
+          amount: expenseData.amount,
+          category: expenseData.item,
+          description: expenseData.note,
+          dateOffset: expenseData.dateOffset || 0
+        };
+      }
+      
+      console.log(`❌ 未知指令類型`);
+      return { type: 'unknown' };
+      
+    } catch (error) {
+      console.error('❌ 命令解析錯誤:', error);
+      return { type: 'error', error: error.message };
     }
-    
-    // 解析記帳資料
-    const expenseData = this.parseExpenseData(text, language);
-    if (expenseData.success) {
-      return {
-        type: 'expense',
-        amount: expenseData.amount,
-        category: expenseData.item,
-        description: expenseData.note,
-        dateOffset: expenseData.dateOffset || 0
-      };
-    }
-    
-    return { type: 'unknown' };
   }
 
   isReminderCommand(text) {
@@ -393,15 +410,24 @@ class GoogleSheetsExpenseController {
   }
   
   async getGoogleSheet() {
-    if (!this.doc) {
-      this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
-      await this.doc.loadInfo();
+    try {
+      if (!this.doc) {
+        console.log('🔄 初始化 Google Sheets 連接...');
+        this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
+        await this.doc.loadInfo();
+        console.log('✅ Google Sheets 連接成功');
+      }
+      return this.doc;
+    } catch (error) {
+      console.error('❌ Google Sheets 連接失敗:', error);
+      throw new Error('無法連接到 Google Sheets，請檢查設定');
     }
-    return this.doc;
   }
 
   async handleExpense(event, command) {
     try {
+      console.log('💰 處理記帳請求:', command);
+      
       let { amount, category, description, dateOffset } = command;
       
       // 項目名稱統一處理（日文轉中文）
@@ -420,6 +446,7 @@ class GoogleSheetsExpenseController {
       // 取得或建立當月工作表
       let sheet = doc.sheetsByTitle[sheetName];
       if (!sheet) {
+        console.log(`📄 建立新的月份工作表: ${sheetName}`);
         sheet = await this.createNewMonthSheet(doc, sheetName);
       }
 
@@ -429,8 +456,10 @@ class GoogleSheetsExpenseController {
         '日期': dateStr,
         '項目': category,
         '金額': amount,
-        '備註': description
+        '備註': description || ''
       });
+
+      console.log('✅ 記帳資料已成功加入');
 
       // 獲取預算資訊並計算剩餘
       const budgetInfo = await this.calculateBudgetRemaining();
@@ -438,7 +467,7 @@ class GoogleSheetsExpenseController {
       const dateLabel = dateOffset === 0 ? '今天' :
         (dateOffset === -1 ? '昨天' : `${Math.abs(dateOffset)}天前`);
       
-      let response = `✅ 記帳成功！\n日期：${dateStr}（${dateLabel}）\n項目：${category}\n金額：${amount.toLocaleString('zh-TW')}円\n備註：${description}`;
+      let response = `✅ 記帳成功！\n日期：${dateStr}（${dateLabel}）\n項目：${category}\n金額：${amount.toLocaleString('zh-TW')}円\n備註：${description || '無'}`;
 
       // 添加預算資訊
       if (budgetInfo.hasBudget) {
@@ -450,16 +479,18 @@ class GoogleSheetsExpenseController {
         text: response
       };
     } catch (error) {
-      console.error('記帳處理錯誤:', error);
+      console.error('❌ 記帳處理錯誤:', error);
       return {
         type: 'text',
-        text: '記帳處理時發生錯誤，請稍後再試。'
+        text: `記帳處理時發生錯誤：${error.message}`
       };
     }
   }
 
   async handleExpenseQuery(event, command, language) {
     try {
+      console.log('📊 處理支出查詢請求');
+      
       const doc = await this.getGoogleSheet();
       const now = new Date();
       const sheetName = this.formatDate(now, 'YYYY-MM');
@@ -513,16 +544,18 @@ class GoogleSheetsExpenseController {
         text: summary
       };
     } catch (error) {
-      console.error('查詢支出錯誤:', error);
+      console.error('❌ 查詢支出錯誤:', error);
       return {
         type: 'text',
-        text: '查詢支出時發生錯誤。'
+        text: `查詢支出時發生錯誤：${error.message}`
       };
     }
   }
 
   async setBudget(amount) {
     try {
+      console.log('💰 設定預算:', amount);
+      
       const doc = await this.getGoogleSheet();
       const now = new Date();
       const sheetName = this.formatDate(now, 'YYYY-MM');
@@ -556,8 +589,8 @@ class GoogleSheetsExpenseController {
 
       return `💰 本月預算已設定為 ${amount.toLocaleString('zh-TW')} 円！\n\n${remaining.message}`;
     } catch (error) {
-      console.error('設定預算錯誤:', error);
-      return '預算設定失敗，請稍後再試';
+      console.error('❌ 設定預算錯誤:', error);
+      return `預算設定失敗：${error.message}`;
     }
   }
 
@@ -636,35 +669,43 @@ class GoogleSheetsExpenseController {
                 `📊 記錄數：${expenseCount} 筆${warningMessage}`
       };
     } catch (error) {
-      console.error('計算剩餘預算錯誤:', error);
+      console.error('❌ 計算剩餘預算錯誤:', error);
       return {
         hasBudget: false,
-        message: '預算計算時發生錯誤'
+        message: `預算計算時發生錯誤：${error.message}`
       };
     }
   }
 
   async createNewMonthSheet(doc, sheetName) {
-    const sheet = await doc.addSheet({
-      title: sheetName,
-      headerValues: ['日期', '項目', '金額', '備註']
-    });
+    try {
+      console.log(`📄 建立新工作表: ${sheetName}`);
+      
+      const sheet = await doc.addSheet({
+        title: sheetName,
+        headerValues: ['日期', '項目', '金額', '備註']
+      });
 
-    // 格式化工作表
-    await sheet.loadCells('A1:D1');
-    
-    // 設定標題列格式
-    for (let i = 0; i < 4; i++) {
-      const cell = sheet.getCell(0, i);
-      cell.textFormat = { bold: true };
-      cell.backgroundColor = { red: 0.91, green: 0.94, blue: 0.996 };
-      cell.horizontalAlignment = 'CENTER';
+      // 格式化工作表
+      await sheet.loadCells('A1:D1');
+      
+      // 設定標題列格式
+      for (let i = 0; i < 4; i++) {
+        const cell = sheet.getCell(0, i);
+        cell.textFormat = { bold: true };
+        cell.backgroundColor = { red: 0.91, green: 0.94, blue: 0.996 };
+        cell.horizontalAlignment = 'CENTER';
+      }
+
+      await sheet.saveUpdatedCells();
+      await sheet.resize({ columnCount: 4 });
+      
+      console.log(`✅ 工作表 ${sheetName} 建立完成`);
+      return sheet;
+    } catch (error) {
+      console.error('❌ 建立工作表失敗:', error);
+      throw error;
     }
-
-    await sheet.saveUpdatedCells();
-    await sheet.resize({ columnCount: 4 });
-    
-    return sheet;
   }
 
   formatDate(date, format) {
@@ -692,11 +733,18 @@ class GoogleSheetsReminderController {
   }
 
   async getGoogleSheet() {
-    if (!this.doc) {
-      this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
-      await this.doc.loadInfo();
+    try {
+      if (!this.doc) {
+        console.log('🔄 初始化 Google Sheets 連接...');
+        this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
+        await this.doc.loadInfo();
+        console.log('✅ Google Sheets 連接成功');
+      }
+      return this.doc;
+    } catch (error) {
+      console.error('❌ Google Sheets 連接失敗:', error);
+      throw new Error('無法連接到 Google Sheets，請檢查設定');
     }
-    return this.doc;
   }
 
   async getReminderSheet() {
@@ -730,17 +778,17 @@ class GoogleSheetsReminderController {
       
       return sheet;
     } catch (error) {
-      console.error('獲取提醒工作表錯誤:', error);
+      console.error('❌ 獲取提醒工作表錯誤:', error);
       throw error;
     }
   }
 
   async handleTodo(event, command, language) {
     try {
+      console.log('⏰ 處理提醒請求:', command);
+      
       const sheet = await this.getReminderSheet();
       const now = moment().tz('Asia/Tokyo');
-      
-      console.log('開始處理提醒命令:', command);
       
       // 解析提醒時間和重複設定
       const reminderData = this.parseReminderCommand(command.text || command.reminder);
@@ -781,7 +829,7 @@ class GoogleSheetsReminderController {
       };
       
     } catch (error) {
-      console.error('提醒處理錯誤:', error);
+      console.error('❌ 提醒處理錯誤:', error);
       return {
         type: 'text',
         text: language === 'ja' ? `リマインダー設定時にエラーが発生しました: ${error.message}` : `設定提醒時發生錯誤: ${error.message}`
@@ -857,7 +905,7 @@ class GoogleSheetsReminderController {
       console.log(`✅ 提醒檢查完成，處理了 ${processedCount} 個提醒`);
       
     } catch (error) {
-      console.error('檢查提醒錯誤:', error);
+      console.error('❌ 檢查提醒錯誤:', error);
     }
   }
 
@@ -881,7 +929,7 @@ class GoogleSheetsReminderController {
       console.log(`✅ 已發送提醒給用戶 ${userId}: ${title}`);
       
     } catch (error) {
-      console.error('發送提醒錯誤:', error);
+      console.error('❌ 發送提醒錯誤:', error);
       // 如果是 LINE API 錯誤，記錄詳細信息
       if (error.response) {
         console.error('LINE API 錯誤回應:', error.response.data);
@@ -913,7 +961,7 @@ class GoogleSheetsReminderController {
       console.log(`✅ 提醒狀態更新完成: ${title}`);
       
     } catch (error) {
-      console.error('更新提醒執行狀態錯誤:', error);
+      console.error('❌ 更新提醒執行狀態錯誤:', error);
     }
   }
 
@@ -1048,26 +1096,11 @@ class GoogleSheetsReminderController {
     return next;
   }
 
-  // 新增：手動觸發提醒的測試方法
-  async testReminder(userId, message) {
-    try {
-      const testMessage = {
-        type: 'text',
-        text: `🧪 測試提醒: ${message}`
-      };
-      
-      await this.lineClient.pushMessage(userId, testMessage);
-      console.log(`✅ 測試提醒已發送給用戶 ${userId}`);
-      return true;
-    } catch (error) {
-      console.error('發送測試提醒失敗:', error);
-      return false;
-    }
-  }
-
   // 查詢提醒功能
   async handleQueryReminders(event, language) {
     try {
+      console.log('📋 處理查詢提醒請求');
+      
       const sheet = await this.getReminderSheet();
       const rows = await sheet.getRows();
       
@@ -1099,7 +1132,7 @@ class GoogleSheetsReminderController {
       };
       
     } catch (error) {
-      console.error('查詢提醒錯誤:', error);
+      console.error('❌ 查詢提醒錯誤:', error);
       return {
         type: 'text',
         text: language === 'ja' ? `リマインダー取得時にエラーが発生しました: ${error.message}` : `查詢提醒時發生錯誤: ${error.message}`
@@ -1110,6 +1143,8 @@ class GoogleSheetsReminderController {
   // 刪除提醒功能
   async handleDeleteReminder(event, command, language = 'ja') {
     try {
+      console.log('🗑️ 處理刪除提醒請求:', command);
+      
       const sheet = await this.getReminderSheet();
       const rows = await sheet.getRows();
       
@@ -1136,7 +1171,7 @@ class GoogleSheetsReminderController {
         };
       }
     } catch (error) {
-      console.error('刪除提醒錯誤:', error);
+      console.error('❌ 刪除提醒錯誤:', error);
       return {
         type: 'text',
         text: language === 'ja'
@@ -1186,6 +1221,12 @@ class LineBotApp {
   }
 
   setupMiddleware() {
+    // 添加錯誤處理中間件
+    this.app.use((req, res, next) => {
+      console.log(`📨 收到請求: ${req.method} ${req.path}`);
+      next();
+    });
+    
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
     
@@ -1198,24 +1239,77 @@ class LineBotApp {
       });
     });
     
-    // LINE webhook 驗證中間件
-    this.app.use('/webhook', line.middleware(this.config));
+    // 測試端點
+    this.app.get('/test', (req, res) => {
+      res.json({
+        status: 'TEST OK',
+        timestamp: new Date().toISOString(),
+        environment: {
+          hasAccessToken: !!process.env.CHANNEL_ACCESS_TOKEN,
+          hasSecret: !!process.env.CHANNEL_SECRET,
+          hasGoogleId: !!process.env.GOOGLE_SPREADSHEET_ID
+        }
+      });
+    });
+    
+    // LINE webhook 驗證中間件（添加錯誤處理）
+    this.app.use('/webhook', (req, res, next) => {
+      try {
+        line.middleware(this.config)(req, res, next);
+      } catch (error) {
+        console.error('❌ LINE middleware 錯誤:', error);
+        res.status(400).json({ error: 'LINE middleware error' });
+      }
+    });
   }
 
   setupRoutes() {
-    // LINE webhook 路由
-    this.app.post('/webhook', (req, res) => {
-      Promise.all(req.body.events.map(this.handleEvent.bind(this)))
-        .then((result) => res.json(result))
-        .catch((err) => {
-          console.error('❌ Webhook 處理錯誤:', err);
-          res.status(500).end();
+    // LINE webhook 路由（改進錯誤處理）
+    this.app.post('/webhook', async (req, res) => {
+      try {
+        console.log('📨 收到 webhook 請求');
+        console.log('請求內容:', JSON.stringify(req.body, null, 2));
+        
+        if (!req.body || !req.body.events) {
+          console.log('❌ 無效的請求格式');
+          return res.status(400).json({ error: 'Invalid request format' });
+        }
+        
+        // 處理每個事件
+        const promises = req.body.events.map(event => this.handleEvent(event));
+        const results = await Promise.allSettled(promises);
+        
+        // 記錄處理結果
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.error(`❌ 事件 ${index} 處理失敗:`, result.reason);
+          } else {
+            console.log(`✅ 事件 ${index} 處理成功`);
+          }
         });
+        
+        // 總是回傳 200 OK 給 LINE
+        res.status(200).json({ 
+          status: 'OK',
+          processed: results.filter(r => r.status === 'fulfilled').length,
+          errors: results.filter(r => r.status === 'rejected').length
+        });
+        
+      } catch (error) {
+        console.error('❌ Webhook 處理錯誤:', error);
+        // 即使有錯誤，也要回傳 200 給 LINE，避免重複發送
+        res.status(200).json({ 
+          status: 'ERROR',
+          message: error.message
+        });
+      }
     });
   }
 
   async handleEvent(event) {
     try {
+      console.log(`📨 處理事件類型: ${event.type}`);
+      
       // 只處理文字訊息
       if (event.type !== 'message' || event.message.type !== 'text') {
         console.log('⏭️ 跳過非文字訊息');
@@ -1223,7 +1317,7 @@ class LineBotApp {
       }
 
       const messageText = event.message.text.trim();
-      console.log(`📨 收到訊息: ${messageText}`);
+      console.log(`📨 收到訊息: "${messageText}"`);
       
       // 偵測語言
       const language = this.languageDetector.detect(messageText);
@@ -1237,6 +1331,13 @@ class LineBotApp {
       
       // 根據命令類型處理
       switch (command.type) {
+        case 'test':
+          replyMessage = {
+            type: 'text',
+            text: `🧪 測試成功！\n時間: ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}\n語言: ${language}`
+          };
+          break;
+          
         case 'expense':
           replyMessage = await this.expenseController.handleExpense(event, command);
           break;
@@ -1273,6 +1374,15 @@ class LineBotApp {
           replyMessage = this.getHelpMessage(language);
           break;
           
+        case 'error':
+          replyMessage = {
+            type: 'text',
+            text: language === 'ja' 
+              ? `エラーが発生しました: ${command.error}` 
+              : `發生錯誤: ${command.error}`
+          };
+          break;
+          
         default:
           replyMessage = {
             type: 'text',
@@ -1284,24 +1394,40 @@ class LineBotApp {
       
       // 發送回復
       if (replyMessage) {
-        console.log('📤 發送回復:', replyMessage.text?.substring(0, 50) + '...');
-        return this.client.replyMessage(event.replyToken, replyMessage);
+        console.log('📤 準備發送回復:', replyMessage.text?.substring(0, 50) + '...');
+        
+        // 確保有 replyToken
+        if (!event.replyToken) {
+          console.log('❌ 缺少 replyToken');
+          return null;
+        }
+        
+        await this.client.replyMessage(event.replyToken, replyMessage);
+        console.log('✅ 回復發送成功');
+        return { success: true };
       }
+      
+      return { success: true, message: 'No reply needed' };
       
     } catch (error) {
       console.error('❌ 處理事件錯誤:', error);
       
-      // 發送錯誤訊息給用戶
-      const errorMessage = {
-        type: 'text',
-        text: '處理您的訊息時發生錯誤，請稍後再試。'
-      };
-      
-      try {
-        return this.client.replyMessage(event.replyToken, errorMessage);
-      } catch (replyError) {
-        console.error('❌ 發送錯誤訊息失敗:', replyError);
+      // 發送錯誤訊息給用戶（如果有 replyToken）
+      if (event.replyToken) {
+        const errorMessage = {
+          type: 'text',
+          text: '處理您的訊息時發生錯誤，請稍後再試。'
+        };
+        
+        try {
+          await this.client.replyMessage(event.replyToken, errorMessage);
+          console.log('✅ 錯誤訊息已發送');
+        } catch (replyError) {
+          console.error('❌ 發送錯誤訊息失敗:', replyError);
+        }
       }
+      
+      throw error; // 重新拋出錯誤以供上層處理
     }
   }
 
@@ -1321,7 +1447,9 @@ class LineBotApp {
       `・「30分後 薬を飲む」\n` +
       `・「毎日18時 運動」\n` +
       `・「リマインダー一覧」\n` +
-      `・「リマインダー削除 1」`
+      `・「リマインダー削除 1」\n\n` +
+      `🧪 テスト:\n` +
+      `・「テスト」- 接続確認`
       :
       `🤖 LINE 記帳機器人使用說明\n\n` +
       `💰 記帳方式:\n` +
@@ -1337,61 +1465,6 @@ class LineBotApp {
       `・「30分鐘後 吃藥」\n` +
       `・「每天18點 運動」\n` +
       `・「查看提醒」\n` +
-      `・「刪除提醒 1」`;
-
-    return {
-      type: 'text',
-      text: helpText
-    };
-  }
-
-  startScheduler() {
-    // 每分鐘檢查一次提醒
-    cron.schedule('* * * * *', async () => {
-      try {
-        await this.todoController.checkAndSendReminders();
-      } catch (error) {
-        console.error('⏰ 排程檢查提醒錯誤:', error);
-      }
-    });
-    
-    console.log('⏰ 提醒排程器已啟動 (每分鐘檢查一次)');
-  }
-
-  start() {
-    this.app.listen(this.port, () => {
-      console.log(`🚀 伺服器運行於 port ${this.port}`);
-      console.log(`📊 Google Sheets 整合: ✅`);
-      console.log(`⏰ 提醒系統: ✅`);
-      console.log(`🌐 雙語支援: ✅ (中文/日文)`);
-    });
-  }
-}
-
-// 全域錯誤處理
-process.on('uncaughtException', (error) => {
-  console.error('❌ 未捕獲的例外:', error);
-  console.error('應用程式將繼續運行...');
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ 未處理的 Promise 拒絕:', reason);
-  console.error('位置:', promise);
-});
-
-// 優雅關閉
-process.on('SIGTERM', () => {
-  console.log('🔄 收到 SIGTERM 信號，準備優雅關閉...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('\n🔄 收到 SIGINT 信號，準備優雅關閉...');
-  process.exit(0);
-});
-
-// 啟動應用程式
-const app = new LineBotApp();
-app.start();
-
-module.exports = LineBotApp;
+      `・「刪除提醒 1」\n\n` +
+      `🧪 測試:\n` +
+      `・「test」- 連接確認`;
