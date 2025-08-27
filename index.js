@@ -1431,7 +1431,7 @@ class LineBotApp {
     }
   }
 
-  getHelpMessage(language) {
+ getHelpMessage(language) {
     const helpText = language === 'ja' ? 
       `🤖 LINE記帳ボット使い方\n\n` +
       `💰 記帳:\n` +
@@ -1468,3 +1468,6 @@ class LineBotApp {
       `・「刪除提醒 1」\n\n` +
       `🧪 測試:\n` +
       `・「test」- 連接確認`;
+
+    return helpText; // ← 添加這一行
+} // ← 添加這個結尾大括號
