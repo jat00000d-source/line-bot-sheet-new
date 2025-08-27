@@ -329,527 +329,36 @@ class LineBotApp {
     this.setupRoutes();
     this.startScheduler();
   }
-
-  initializeControllers() {
-    // 使用 Google Sheets 整合的控制器
-    this.expenseController = new GoogleSheetsExpenseController();
-    this.todoController = new GoogleSheetsReminderController(this.client);
-    this.commandParser = new EnhancedCommandParser();
-    this.languageDetector = new BasicLanguageDetector();
-    
-    console.log('✅ 控制器初始化完成 (包含 Google Sheets 整合)');
-  }
-
-  setupMiddleware() {
-    this.app.use(express.json());
-    this.app.use(express.urlencoded({ extended: true }));
-    
-    // 請求記錄中介軟體
-    this.app.use((req, res, next) => {
-      const now = moment().tz('Asia/Tokyo');
-      console.log(`📝 [${now.format('YYYY-MM-DD HH:mm:ss JST')}] ${req.method} ${req.path}`);
-      next();
-    });
-    
-    // 健康檢查端點
-    this.app.get('/health', (req, res) => {
-      const now = moment().tz('Asia/Tokyo');
-      
-      res.status(200).json({ 
-        status: 'OK', 
-        timestamp: now.toISOString(),
-        localTime: now.format('YYYY-MM-DD HH:mm:ss JST'),
-        timezone: 'Asia/Tokyo',
-        services: {
-          'expense-tracking': '✅ 運行中 (Google Sheets)',
-          'reminders': '✅ 運行中 (Google Sheets)',
-          'scheduler': '✅ 運行中'
-        },
-        environment: process.env.NODE_ENV || 'development'
-      });
-    });
-
-    // 根目錄端點
-    this.app.get('/', (req, res) => {
-      res.status(200).json({
-        message: 'LINE Bot 記帳提醒系統 - 改良版',
-        status: 'Running',
-        timezone: 'JST (UTC+9)',
-        features: [
-          'Google Sheets 記帳功能', 
-          'Google Sheets 提醒功能', 
-          '自動提醒發送', 
-          '多語言支援 (繁體中文/日語)', 
-          '預算管理',
-          '重複提醒支援',
-          '自然語言解析'
-        ]
-      });
-    });
-  }
-
-  setupRoutes() {
-    // LINE Webhook
-    this.app.post('/webhook', async (req, res) => {
-      try {
-        console.log('📨 收到 Webhook 請求');
-        console.log('請求標頭:', JSON.stringify(req.headers, null, 2));
-        console.log('請求內容:', JSON.stringify(req.body, null, 2));
-        
-        // 先回應 200 狀態碼，避免超時
-        res.status(200).json({ message: 'OK' });
-        
-        if (!req.body || !req.body.events) {
-          console.log('⚠️ 無效的請求內容');
-          return;
-        }
-
-        // 異步處理事件，避免阻塞回應
-        setImmediate(async () => {
-          try {
-            const results = await Promise.allSettled(
-              req.body.events.map(event => this.handleEvent(event))
-            );
-            
-            const failed = results.filter(r => r.status === 'rejected');
-            if (failed.length > 0) {
-              console.error('❌ 部分事件處理失敗:', failed.map(f => f.reason));
-            }
-            
-            console.log('✅ Webhook 處理完成:', results.length, '個事件');
-          } catch (asyncErr) {
-            console.error('❌ 異步事件處理錯誤:', asyncErr);
-          }
-        });
-        
-      } catch (err) {
-        console.error('❌ Webhook 錯誤:', err);
-        console.error('錯誤堆疊:', err.stack);
-        
-        if (!res.headersSent) {
-          res.status(200).json({ message: 'Error handled' });
-        }
-      }
-    });
-
-    // 測試端點
-    this.app.get('/test', (req, res) => {
-      res.status(200).json({
-        message: '測試端點正常運作 - 改良版',
-        timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST'),
-        controllers: {
-          expense: !!this.expenseController,
-          reminder: !!this.todoController,
-          parser: !!this.commandParser,
-          detector: !!this.languageDetector
-        },
-        googleSheets: {
-          configured: !!(process.env.GOOGLE_SPREADSHEET_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL),
-          features: ['記帳功能', '提醒功能', '自動排程']
-        }
-      });
-    });
-
-    // 手動觸發提醒檢查的測試端點
-    this.app.post('/test-reminders', async (req, res) => {
-      try {
-        console.log('🧪 手動觸發提醒檢查');
-        await this.todoController.checkAndSendReminders();
-        
-        res.status(200).json({
-          success: true,
-          message: '提醒檢查已執行',
-          timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
-        });
-        
-      } catch (error) {
-        console.error('❌ 測試提醒檢查錯誤:', error);
-        res.status(500).json({
-          success: false,
-          error: error.message,
-          timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
-        });
-      }
-    });
-
-    // 模擬 LINE 事件的測試端點
-    this.app.post('/test-event', async (req, res) => {
-      try {
-        const testEvent = {
-          type: 'message',
-          message: {
-            type: 'text',
-            text: req.body.message || '測試訊息'
-          },
-          source: {
-            userId: 'test-user-id'
-          },
-          replyToken: 'test-reply-token'
-        };
-
-        console.log('🧪 處理測試事件:', testEvent);
-        
-        const result = await this.handleEvent(testEvent);
-        
-        res.status(200).json({
-          success: true,
-          message: '測試事件處理完成',
-          result: result,
-          timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
-        });
-        
-      } catch (error) {
-        console.error('❌ 測試事件處理錯誤:', error);
-        res.status(200).json({
-          success: false,
-          error: error.message,
-          timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
-        });
-      }
-    });
-  }
-
-  async handleEvent(event) {
-    try {
-      console.log('🎯 處理事件類型:', event.type);
-      console.log('🎯 完整事件內容:', JSON.stringify(event, null, 2));
-      
-      if (event.type !== 'message' || event.message.type !== 'text') {
-        console.log('⏭️ 跳過非文字訊息事件');
-        return null;
-      }
-
-      const userId = event.source.userId;
-      const messageText = event.message.text.trim();
-      
-      console.log(`👤 用戶 ID: ${userId}`);
-      console.log(`💬 訊息內容: "${messageText}"`);
-      
-      // 檢測語言
-      const language = this.languageDetector.detect(messageText);
-      console.log(`🌐 檢測到的語言: ${language}`);
-      
-      // 解析指令
-      const command = this.commandParser.parseCommand(messageText, language);
-      console.log(`🔧 解析的指令:`, JSON.stringify(command, null, 2));
-      
-      let response;
-      
-      // 根據指令類型分發到對應的控制器
-      switch (command.type) {
-        case 'expense':
-          console.log('💰 處理記帳指令');
-          response = await this.expenseController.handleExpense(event, command);
-          break;
-        
-        case 'query_expenses':
-          console.log('💰 查詢支出記錄');
-          response = await this.expenseController.handleExpenseQuery(event, command, language);
-          break;
-        
-        case 'set_budget':
-          console.log('💰 設定預算');
-          const budgetResult = await this.expenseController.setBudget(command.amount);
-          response = {
-            type: 'text',
-            text: budgetResult
-          };
-          break;
-        
-        case 'budget':
-        case 'remaining':
-          console.log('💰 查看預算狀況');
-          const budgetInfo = await this.expenseController.calculateBudgetRemaining();
-          response = {
-            type: 'text',
-            text: budgetInfo.message
-          };
-          break;
-        
-        case 'reminder':
-          console.log('⏰ 處理提醒指令');
-          response = await this.todoController.handleTodo(event, command, language);
-          break;
-        
-        case 'query_reminders':
-          console.log('📋 查詢提醒列表');
-          response = await this.todoController.handleQueryReminders(event, language);
-          break;
-        
-        case 'delete_reminder':
-          console.log('🗑️ 刪除提醒');
-          response = await this.todoController.handleDeleteReminder(event, command, language);
-          break;
-        
-        case 'help':
-          console.log('❓ 顯示說明');
-          response = {
-            type: 'text',
-            text: this.getHelpMessage(language)
-          };
-          break;
-        
-        default:
-          console.log('❓ 處理預設回應');
-          response = await this.handleDefault(event, language);
-          break;
-      }
-
-      console.log('📤 準備回應:', JSON.stringify(response, null, 2));
-
-      // 如果是測試事件，不要真的發送訊息
-      if (event.replyToken === 'test-reply-token') {
-        console.log('🧪 這是測試事件，跳過實際發送');
-        return response;
-      }
-
-      if (response && event.replyToken) {
-        try {
-          await this.client.replyMessage(event.replyToken, response);
-          console.log('✅ 成功傳送回應');
-        } catch (replyError) {
-          console.error('❌ 傳送回應失敗:', replyError);
-          console.error('回應內容:', JSON.stringify(response, null, 2));
-        }
-        return response;
-      }
-      
-      return null;
-      
-    } catch (error) {
-      console.error('❌ 處理事件時發生錯誤:', error);
-      console.error('錯誤堆疊:', error.stack);
-      console.error('事件內容:', JSON.stringify(event, null, 2));
-      
-      // 嘗試傳送錯誤訊息
-      if (event.replyToken && event.replyToken !== 'test-reply-token') {
-        try {
-          const errorMessage = {
-            type: 'text',
-            text: '處理訊息時發生錯誤，請稍後再試。'
-          };
-          
-          await this.client.replyMessage(event.replyToken, errorMessage);
-          console.log('✅ 成功傳送錯誤訊息');
-        } catch (replyError) {
-          console.error('❌ 傳送錯誤訊息失敗:', replyError);
-        }
-      }
-      
-      throw error;
-    }
-  }
-
-  async handleDefault(event, language) {
-    const helpMessage = language === 'ja' ? 
-      'こんにちは！改良版家計簿とリマインダー機能をご利用いただけます。\n\n💰 家計簿機能:\n「食費 500円 昼食」\n「交通費 200円」\n「支出確認」または「集計」\n「予算設定 50000」\n\n⏰ リマインダー機能（NEW！）:\n「明日8時に薬を飲む」\n「毎日19時に運動」\n「毎週月曜日に会議」\n「30分後に買い物」\n\n📋 管理機能:\n「リマインダー一覧」\n「リマインダー削除 [番号]」\n\n✨ 新機能:\n• Google Sheets 自動保存\n• 自動リマインダー送信\n• 繰り返し設定対応\n• 自然言語理解向上\n\n「説明」で詳細な使用方法をご確認ください。' :
-      '您好！我是改良版記帳和提醒助手。\n\n💰 記帳功能:\n「食物 50元 午餐」\n「交通 30元」\n「查看支出」或「總結」\n「設定預算 50000」\n\n⏰ 提醒功能（全新！）:\n「明天8點吃藥」\n「每天晚上7點運動」\n「每週一開會」\n「30分鐘後買東西」\n\n📋 管理功能:\n「查看提醒」\n「刪除提醒 [編號]」\n\n✨ 新功能:\n• Google Sheets 自動儲存\n• 自動提醒發送\n• 支援重複設定\n• 自然語言理解增強\n\n請輸入「說明」查看詳細使用方法。';
-    
-    return {
-      type: 'text',
-      text: helpMessage
-    };
-  }
-
-  getHelpMessage(language = 'zh') {
-    if (language === 'ja') {
-      return `📝 記帳ボット使用説明 - 改良版\n\n` +
-             `💡 記帳形式：\n` +
-             `【従来形式】\n` +
-             `項目　金額　[備考]（全角スペース対応）\n` +
-             `項目 金額 [備考]（半角スペース対応）\n\n` +
-             `【自然言語形式】\n` +
-             `• 昨日ランチ100円食べた\n` +
-             `• 今日コーヒー85円\n` +
-             `• 交通費150\n` +
-             `• 午餐100元（中国語もOK）\n\n` +
-             `💰 予算管理：\n` +
-             `• 予算設定 50000 （月度予算設定）\n` +
-             `• 予算 （予算状況確認）\n` +
-             `• 残り （残額確認）\n\n` +
-             `⏰ リマインダー機能（NEW！）：\n` +
-             `【時間指定】\n` +
-             `• 明日8時に薬を飲む\n` +
-             `• 今日15:30に会議\n` +
-             `• 30分後に買い物\n` +
-             `• 2時間後に電話をかける\n\n` +
-             `【繰り返し設定】\n` +
-             `• 毎日19時に運動\n` +
-             `• 毎週月曜日9時に会議\n` +
-             `• 毎月1日に家賃を払う\n\n` +
-             `【管理機能】\n` +
-             `• リマインダー一覧 （全ての提醒確認）\n` +
-             `• リマインダー削除 2 （2番目を削除）\n\n` +
-             `✨ 改良点：\n` +
-             `• Google Sheets 完全統合\n` +
-             `• 自動リマインダー送信\n` +
-             `• 繰り返し機能完備\n` +
-             `• 自然言語理解向上\n` +
-             `• 中国語・日本語完全対応\n` +
-             `• データ永続化`;
-    } else {
-      return `📝 記帳機器人使用說明 - 改良版\n\n` +
-             `💡 記帳格式：\n` +
-             `【傳統格式】\n` +
-             `項目　金額　[備註]（支援全形空格）\n` +
-             `項目 金額 [備註]（支援半形空格）\n\n` +
-             `【自然語言格式】\n` +
-             `• 昨天午餐吃了100元\n` +
-             `• 今天咖啡85円\n` +
-             `• 交通費150\n` +
-             `• ランチ200（日文也可以）\n\n` +
-             `💰 預算管理：\n` +
-             `• 設定預算 50000 （設定月度預算）\n` +
-             `• 預算 （查看預算狀況）\n` +
-             `• 剩餘 （查看剩餘金額）\n\n` +
-             `⏰ 提醒功能（全新！）：\n` +
-             `【時間指定】\n` +
-             `• 明天8點吃藥\n` +
-             `• 今天下午3點半開會\n` +
-             `• 30分鐘後買東西\n` +
-             `• 2小時後打電話\n\n` +
-             `【重複設定】\n` +
-             `• 每天晚上7點運動\n` +
-             `• 每週一早上9點開會\n` +
-             `• 每月1號繳房租\n\n` +
-             `【管理功能】\n` +
-             `• 查看提醒 （查看所有提醒）\n` +
-             `• 刪除提醒 2 （刪除第2個提醒）\n\n` +
-             `✨ 改良特色：\n` +
-             `• Google Sheets 完全整合\n` +
-             `• 自動提醒發送\n` +
-             `• 重複功能完善\n` +
-             `• 自然語言理解增強\n` +
-             `• 支援中日雙語\n` +
-             `• 資料永久保存`;
-    }
-  }
-
-  startScheduler() {
-    try {
-      // 每分鐘檢查提醒（更頻繁的檢查確保準確性）
-      cron.schedule('* * * * *', async () => {
-        try {
-          const now = moment().tz('Asia/Tokyo');
-          console.log(`⏰ [${now.format('YYYY-MM-DD HH:mm:ss JST')}] 檢查提醒中...`);
-          
-          await this.todoController.checkAndSendReminders();
-          
-        } catch (error) {
-          console.error('❌ 排程器錯誤:', error);
-        }
-      }, {
-        timezone: 'Asia/Tokyo'
-      });
-
-      // 每小時執行一次系統狀態報告（可選）
-      cron.schedule('0 * * * *', () => {
-        const now = moment().tz('Asia/Tokyo');
-        console.log(`📊 [${now.format('YYYY-MM-DD HH:mm:ss JST')}] 系統狀態正常 - 提醒系統運行中`);
-      }, {
-        timezone: 'Asia/Tokyo'
-      });
-      
-      console.log('⏰ 提醒排程器已啟動 (JST 時區)');
-      console.log(`🕐 目前 JST 時間: ${moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')}`);
-      console.log('📅 排程設定:');
-      console.log('   - 每分鐘檢查提醒');
-      console.log('   - 每小時系統狀態報告');
-      
-    } catch (error) {
-      console.error('❌ 排程器啟動失敗:', error);
-    }
-  }
-
-  start() {
-    this.app.listen(this.port, () => {
-      const startTime = moment().tz('Asia/Tokyo');
-      console.log('\n🚀 =================================');
-      console.log(`   LINE Bot 伺服器啟動成功 - 改良版`);
-      console.log('🚀 =================================');
-      console.log(`📍 Port: ${this.port}`);
-      console.log(`🕐 啟動時間: ${startTime.format('YYYY-MM-DD HH:mm:ss JST')}`);
-      console.log(`🌏 時區: Asia/Tokyo (JST, UTC+9)`);
-      console.log(`💰 記帳功能: ✅ 已啟用 (Google Sheets)`);
-      console.log(`⏰ 提醒功能: ✅ 已啟用 (Google Sheets + 自動發送)`);
-      console.log(`🔄 排程系統: ✅ 已啟用 (每分鐘檢查)`);
-      console.log(`🌐 多語言支援: ✅ 繁體中文/日語`);
-      
-      console.log('\n🔧 環境變數狀態:');
-      console.log(`   CHANNEL_ACCESS_TOKEN: ${process.env.CHANNEL_ACCESS_TOKEN ? '✅ 已設定' : '❌ 未設定'}`);
-      console.log(`   CHANNEL_SECRET: ${process.env.CHANNEL_SECRET ? '✅ 已設定' : '❌ 未設定'}`);
-      console.log(`   GOOGLE_SPREADSHEET_ID: ${process.env.GOOGLE_SPREADSHEET_ID ? '✅ 已設定' : '❌ 未設定'}`);
-      console.log(`   GOOGLE_SERVICE_ACCOUNT_EMAIL: ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? '✅ 已設定' : '❌ 未設定'}`);
-      console.log(`   GOOGLE_PRIVATE_KEY: ${process.env.GOOGLE_PRIVATE_KEY ? '✅ 已設定' : '❌ 未設定'}`);
-      
-      console.log('\n🔧 控制器狀態:');
-      console.log(`   ExpenseController: ${this.expenseController.constructor.name} (Google Sheets)`);
-      console.log(`   ReminderController: ${this.todoController.constructor.name} (Google Sheets + 自動發送)`);
-      console.log(`   CommandParser: ${this.commandParser.constructor.name} (增強版)`);
-      console.log(`   LanguageDetector: ${this.languageDetector.constructor.name}`);
-      
-      console.log('\n✨ 改良功能:');
-      console.log('   • Google Sheets 完全整合（記帳 + 提醒）');
-      console.log('   • 自動提醒發送系統');
-      console.log('   • 重複提醒支援（每天/每週/每月/每年）');
-      console.log('   • 自然語言時間解析');
-      console.log('   • 資料永久保存');
-      console.log('   • 增強的指令解析');
-      
-      console.log('\n🔗 API 端點:');
-      console.log('   POST /webhook - LINE Bot Webhook');
-      console.log('   GET  /health - 健康檢查');
-      console.log('   GET  /test - 測試端點');
-      console.log('   POST /test-event - 測試事件處理');
-      console.log('   POST /test-reminders - 手動觸發提醒檢查');
-      
-      console.log('\n✅ 伺服器準備就緒，等待請求...\n');
-    });
-  }
-}
-
-// 全域錯誤處理
-process.on('uncaughtException', (error) => {
-  console.error('❌ 未捕獲的例外:', error);
-  console.error('應用程式將繼續運行...');
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ 未處理的 Promise 拒絕:', reason);
-  console.error('位置:', promise);
-});
-
-// 優雅關閉
-process.on('SIGTERM', () => {
-  console.log('🔄 收到 SIGTERM 信號，準備優雅關閉...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('\n🔄 收到 SIGINT 信號，準備優雅關閉...');
-  process.exit(0);
-});
-
-// 啟動應用程式
-const app = new LineBotApp();
-app.start();
-
-module.exports = LineBotApp;
 require('dotenv').config();
-;
+
+// 必要的模組導入
+const express = require('express');
+const line = require('@line/bot-sdk');
+const { GoogleSpreadsheet } = require('google-spreadsheet');
+const { JWT } = require('google-auth-library');
+const cron = require('node-cron');
 const moment = require('moment-timezone');
+
 // 設定預設時區為日本時間
 moment.tz.setDefault('Asia/Tokyo');
 
-// 檢查必要的環境變數
+// 環境變數驗證
 function validateEnvironment() {
-  const required = ['CHANNEL_ACCESS_TOKEN', 'CHANNEL_SECRET', 'GOOGLE_SPREADSHEET_ID', 'GOOGLE_SERVICE_ACCOUNT_EMAIL', 'GOOGLE_PRIVATE_KEY'];
-  const missing = required.filter(key => !process.env[key]);
+  const required = [
+    'CHANNEL_ACCESS_TOKEN',
+    'CHANNEL_SECRET',
+    'GOOGLE_SPREADSHEET_ID',
+    'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+    'GOOGLE_PRIVATE_KEY'
+  ];
   
-  if (missing.length > 0) {
-    console.error('❌ 缺少必要的環境變數:', missing.join(', '));
-    process.exit(1);
+  for (const key of required) {
+    if (!process.env[key]) {
+      console.error(`❌ 缺少環境變數: ${key}`);
+      process.exit(1);
+    }
   }
+  console.log('✅ 環境變數驗證通過');
 }
 
 // Google Sheets 設定
@@ -924,6 +433,157 @@ const CATEGORY_MAPPING = {
   '病院': '醫療',
   '薬': '醫療'
 };
+
+// ===== 在這裡加上缺少的類別定義 =====
+
+// 基本語言檢測器
+class BasicLanguageDetector {
+  detect(text) {
+    const japaneseChars = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/;
+    return japaneseChars.test(text) ? 'ja' : 'zh';
+  }
+}
+
+// 增強版命令解析器
+class EnhancedCommandParser {
+  constructor() {
+    // 金額相關的關鍵詞
+    this.amountKeywords = ['元', '円', '圓', '塊', '錢', '用了', '花了', '花費', '支出', '費用'];
+    
+    // 日期相關的關鍵詞
+    this.dateKeywords = {
+      '今天': 0,
+      '昨天': -1,
+      '前天': -2,
+      '大前天': -3,
+      '今日': 0,
+      '昨日': -1,
+      '一昨日': -2
+    };
+  }
+  
+  parseCommand(text, language = 'zh') {
+    const lowerText = text.toLowerCase();
+    
+    // 檢查特殊指令
+    const commandType = COMMAND_MAPPING[text.trim()];
+    if (commandType) {
+      return { type: commandType };
+    }
+    
+    // 這裡需要加上其他解析邏輯...
+    return { type: 'default' };
+  }
+}
+
+// Google Sheets 整合的 ExpenseController
+class GoogleSheetsExpenseController {
+  constructor() {
+    this.doc = null;
+  }
+  
+  async getGoogleSheet() {
+    if (!this.doc) {
+      this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
+      await this.doc.loadInfo();
+    }
+    return this.doc;
+  }
+  
+  // 這裡需要加上其他方法...
+}
+
+// Google Sheets 整合的 ReminderController
+class GoogleSheetsReminderController {
+  constructor(client) {
+    this.client = client;
+    this.doc = null;
+  }
+  
+  async getGoogleSheet() {
+    if (!this.doc) {
+      this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
+      await this.doc.loadInfo();
+    }
+    return this.doc;
+  }
+  
+  async checkAndSendReminders() {
+    // 實作提醒檢查邏輯
+  }
+  
+  // 這裡需要加上其他方法...
+}
+
+// 主要的 LineBotApp 類別
+class LineBotApp {
+  constructor() {
+    this.app = express();
+    this.port = process.env.PORT || 3000;
+    
+    // 驗證環境變數
+    validateEnvironment();
+    
+    // LINE Bot 配置
+    this.config = {
+      channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+      channelSecret: process.env.CHANNEL_SECRET,
+    };
+    
+    this.client = new line.Client(this.config);
+    
+    // 初始化控制器
+    this.initializeControllers();
+    
+    // 設定中介軟體和路由
+    this.setupMiddleware();
+    this.setupRoutes();
+    
+    // 啟動排程器
+    this.startScheduler();
+  }
+
+  initializeControllers() {
+    // 使用 Google Sheets 整合的控制器
+    this.expenseController = new GoogleSheetsExpenseController();
+    this.todoController = new GoogleSheetsReminderController(this.client);
+    this.commandParser = new EnhancedCommandParser();
+    this.languageDetector = new BasicLanguageDetector();
+    
+    console.log('✅ 控制器初始化完成 (包含 Google Sheets 整合)');
+  }
+
+  // ... 其他方法保持不變 ...
+}
+
+// 全域錯誤處理
+process.on('uncaughtException', (error) => {
+  console.error('❌ 未捕獲的例外:', error);
+  console.error('應用程式將繼續運行...');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ 未處理的 Promise 拒絕:', reason);
+  console.error('位置:', promise);
+});
+
+// 優雅關閉
+process.on('SIGTERM', () => {
+  console.log('🔄 收到 SIGTERM 信號，準備優雅關閉...');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('\n🔄 收到 SIGINT 信號，準備優雅關閉...');
+  process.exit(0);
+});
+
+// 啟動應用程式
+const app = new LineBotApp();
+app.start();
+
+module.exports = LineBotApp;
+ 
 
 // === Google Sheets 整合的 ExpenseController ===
 class GoogleSheetsExpenseController {
