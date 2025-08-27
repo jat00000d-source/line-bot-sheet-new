@@ -41,25 +41,6 @@ class EnhancedCommandParser {
       '一昨日': -2
     };
   }
-  // ... 你的其他方法
-
-// 增強版命令解析器
-class EnhancedCommandParser {
-  constructor() {
-    // 金額相關的關鍵詞
-    this.amountKeywords = ['元', '円', '圓', '塊', '錢', '用了', '花了', '花費', '支出', '費用'];
-    
-    // 日期相關的關鍵詞
-    this.dateKeywords = {
-      '今天': 0,
-      '昨天': -1,
-      '前天': -2,
-      '大前天': -3,
-      '今日': 0,
-      '昨日': -1,
-      '一昨日': -2
-    };
-  }
 
   parseCommand(text, language = 'zh') {
     const lowerText = text.toLowerCase();
