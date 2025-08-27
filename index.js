@@ -428,9 +428,6 @@ const CATEGORY_MAPPING = {
 };
 
 // ===== 在這裡加上缺少的類別定義 =====
-
-}
-
 // 增強版命令解析器
 class EnhancedCommandParser {
   constructor() {
