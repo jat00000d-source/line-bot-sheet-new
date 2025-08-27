@@ -2,6 +2,92 @@ console.log('=== LINE Bot 啟動開始 ===');
 console.log('Node.js 版本:', process.version);
 console.log('當前時間:', new Date().toISOString());
 
+// 添加更詳細的錯誤處理
+process.on('uncaughtException', (error) => {
+  console.error('❌ 未捕捉的例外錯誤:', error.message);
+  console.error('錯誤堆疊:', error.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ 未處理的 Promise 拒絕:', reason);
+  console.error('Promise:', promise);
+  process.exit(1);
+});
+
+// 在每個主要步驟加入日誌
+console.log('🔍 步驟 1: 載入必要模組...');
+try {
+  // 你的 require 語句
+  const line = require('@line/bot-sdk');
+  const express = require('express');
+  // ... 其他模組
+  console.log('✅ 模組載入完成');
+} catch (error) {
+  console.error('❌ 模組載入失敗:', error);
+  process.exit(1);
+}
+
+console.log('🔍 步驟 2: 檢查環境變數...');
+const requiredEnvVars = [
+  'LINE_CHANNEL_SECRET',
+  'LINE_CHANNEL_ACCESS_TOKEN',
+  'PORT'
+  // 其他必要的環境變數
+];
+
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    console.error(`❌ 缺少環境變數: ${envVar}`);
+    process.exit(1);
+  } else {
+    console.log(`✅ ${envVar}: 已設定`);
+  }
+}
+
+console.log('🔍 步驟 3: 初始化 LINE 客戶端...');
+try {
+  const config = {
+    channelSecret: process.env.LINE_CHANNEL_SECRET,
+    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
+  };
+  const client = new line.messagingApi.MessagingApiClient({
+    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
+  });
+  console.log('✅ LINE 客戶端初始化完成');
+} catch (error) {
+  console.error('❌ LINE 客戶端初始化失敗:', error);
+  process.exit(1);
+}
+
+console.log('🔍 步驟 4: 初始化 Express 應用...');
+try {
+  const app = express();
+  const port = process.env.PORT || 3000;
+  console.log('✅ Express 應用初始化完成');
+} catch (error) {
+  console.error('❌ Express 應用初始化失敗:', error);
+  process.exit(1);
+}
+
+console.log('🔍 步驟 5: 設定中間件...');
+// 你的中間件設定
+
+console.log('🔍 步驟 6: 啟動伺服器...');
+try {
+  app.listen(port, () => {
+    console.log(`✅ 伺服器啟動成功，監聽埠口: ${port}`);
+    console.log('🎉 LINE Bot 完全啟動完成！');
+  });
+} catch (error) {
+  console.error('❌ 伺服器啟動失敗:', error);
+  process.exit(1);
+}
+
+console.log('=== LINE Bot 啟動開始 ===');
+console.log('Node.js 版本:', process.version);
+console.log('當前時間:', new Date().toISOString());
+
 require('dotenv').config();
 
 // 必要的模組導入
