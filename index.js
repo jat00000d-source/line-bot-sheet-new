@@ -429,11 +429,7 @@ const CATEGORY_MAPPING = {
 
 // ===== 在這裡加上缺少的類別定義 =====
 
-// 基本語言檢測器
-class BasicLanguageDetector {
-  detect(text) {
-    const japaneseChars = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/;
-    return japaneseChars.test(text) ? 'ja' : 'zh';
+
   }
 }
 
