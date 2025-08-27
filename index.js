@@ -1,3 +1,48 @@
+// 必要的模組導入
+const express = require('express');
+const line = require('@line/bot-sdk');
+const { GoogleSpreadsheet } = require('google-spreadsheet');
+const { JWT } = require('google-auth-library');
+const cron = require('node-cron');
+
+// 環境變數驗證
+function validateEnvironment() {
+  const required = [
+    'CHANNEL_ACCESS_TOKEN',
+    'CHANNEL_SECRET',
+    'GOOGLE_SPREADSHEET_ID',
+    'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+    'GOOGLE_PRIVATE_KEY'
+  ];
+  
+  for (const key of required) {
+    if (!process.env[key]) {
+      console.error(`❌ 缺少環境變數: ${key}`);
+      process.exit(1);
+    }
+  }
+  console.log('✅ 環境變數驗證通過');
+}
+
+// 增強版命令解析器
+class EnhancedCommandParser {
+  constructor() {
+    // 金額相關的關鍵詞
+    this.amountKeywords = ['元', '円', '圓', '塊', '錢', '用了', '花了', '花費', '支出', '費用'];
+    
+    // 日期相關的關鍵詞
+    this.dateKeywords = {
+      '今天': 0,
+      '昨天': -1,
+      '前天': -2,
+      '大前天': -3,
+      '今日': 0,
+      '昨日': -1,
+      '一昨日': -2
+    };
+  }
+  // ... 你的其他方法
+
 // 增強版命令解析器
 class EnhancedCommandParser {
   constructor() {
