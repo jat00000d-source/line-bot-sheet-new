@@ -815,74 +815,44 @@ class GoogleSheetsReminderController {
   }
 
   // 刪除提醒功能保持不變
-  async handleDeleteReminder(event, command, language) {
-    try {
-      const sheet = await this.getReminderSheet();
-      const rows = await sheet.getRows();
+ async deleteReminder(event, command, language = 'ja') {
+  try {
+    const sheet = await this.getReminderSheet();
+    const rows = await sheet.getRows();
+    
+    const userReminders = rows.filter(row => 
+      row.get('location') === event.source.userId && 
+      row.get('status') === 'active'
+    );
+    
+    const index = parseInt(command.index) - 1;
+    
+    if (index >= 0 && index < userReminders.length) {
+      const reminderToDelete = userReminders[index];
+      reminderToDelete.set('status', 'deleted');
+      await reminderToDelete.save();
       
-      const userReminders = rows.filter(row => 
-        row.get('location') === event.source.userId && 
-        row.get('status') === 'active'
-      );
-      
-      const index = parseInt(command.index) - 1;
-      
-      if (index >= 0 && index < userReminders.length) {
-        const reminderToDelete = userReminders[index];
-        reminderToDelete.set('status', 'deleted');
-        await reminderToDelete.save();
-        
-        return {
-          type: 'text',
-          text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
-        };
-      } else {
-      try {
-  // 這行是你真正執行刪除的函式；若它就是外層同名方法，請改名成 deleteReminderFromDB 之類以免遞迴
-  const deleted = await deleteReminder(id);
-
-  if (deleted) {
+      return {
+        type: 'text',
+        text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
+      };
+    } else {
+      return {
+        type: 'text',
+        text: language === 'ja' ? '指定されたリマインダーが見つかりません。' : '找不到指定的提醒。'
+      };
+    }
+  } catch (error) {
+    console.error('刪除提醒錯誤:', error);
     return {
       type: 'text',
-      text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
-    };
-  } else {
-    return {
-      type: 'text',
-      text: language === 'ja' ? '指定されたリマインダーが見つかりません。' : '找不到指定的提醒。'
+      text: language === 'ja'
+        ? `リマインダー削除時にエラーが発生しました: ${error.message}`
+        : `刪除提醒時發生錯誤: ${error.message}`
     };
   }
-} catch (error) {
-  console.error('刪除提醒錯誤:', error);
-  return {
-    type: 'text',
-    text: language === 'ja'
-      ? `リマインダー削除時にエラーが発生しました: ${error.message}`
-      : `刪除提醒時發生錯誤: ${error.message}`
-  };
-}
-}, // 方法之間的逗號，下一個 parseReminderCommand 會從這行後面開始
+}, // ← 方法之間要保留逗號，下一個 parseReminderCommand 就能正常接上
 
-
-parseReminderCommand(text) {
-  const now = moment().tz('Asia/Tokyo');
-  let content = text;
-  let datetime = now.clone().add(1, 'hour'); // 預設1小時後
-  let recurring = null;
-
-  // 解析時間表達式
-  const timePatterns = [
-    // 絕對時間 - 今天/明天 + 時間
-    {
-      pattern: /(今天|今日)\s*(\d{1,2})[:：時点]?(\d{0,2})?/,
-      handler: (match) => {
-        const hour = parseInt(match[2]);
-        const minute = parseInt(match[3] || '0');
-        datetime = now.clone().hour(hour).minute(minute).second(0);
-        if (datetime.isBefore(now)) datetime.add(1, 'day');
-        content = text.replace(match[0], '').trim();
-      }
-    },
     {
       pattern: /(明天|明日)\s*(\d{1,2})[:：時点]?(\d{0,2})?/,
       handler: (match) => {
