@@ -1,15 +1,20 @@
-// 檔案開頭
+// 檔案開頭 - 載入所有必要模組
+require('dotenv').config();
 const line = require('@line/bot-sdk');
 const express = require('express');
-
-console.log('=== LINE Bot 啟動開始 ===');
-// 其餘程式碼...
+const { GoogleSpreadsheet } = require('google-spreadsheet');
+const { JWT } = require('google-auth-library');
+const cron = require('node-cron');
+const moment = require('moment-timezone');
 
 console.log('=== LINE Bot 啟動開始 ===');
 console.log('Node.js 版本:', process.version);
 console.log('當前時間:', new Date().toISOString());
 
-// 添加更詳細的錯誤處理
+// 設定預設時區為日本時間
+moment.tz.setDefault('Asia/Tokyo');
+
+// 錯誤處理
 process.on('uncaughtException', (error) => {
   console.error('❌ 未捕捉的例外錯誤:', error.message);
   console.error('錯誤堆疊:', error.stack);
@@ -22,97 +27,14 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
-// 在每個主要步驟加入日誌
-console.log('🔍 步驟 1: 載入必要模組...');
-try {
-  // 你的 require 語句
-  const line = require('@line/bot-sdk');
-  const express = require('express');
-  // ... 其他模組
-  console.log('✅ 模組載入完成');
-} catch (error) {
-  console.error('❌ 模組載入失敗:', error);
-  process.exit(1);
-}
-
-console.log('🔍 步驟 2: 檢查環境變數...');
-const requiredEnvVars = [
-  'LINE_CHANNEL_SECRET',
-  'LINE_CHANNEL_ACCESS_TOKEN',
-  'PORT'
-  // 其他必要的環境變數
-];
-
-for (const envVar of requiredEnvVars) {
-  if (!process.env[envVar]) {
-    console.error(`❌ 缺少環境變數: ${envVar}`);
-    process.exit(1);
-  } else {
-    console.log(`✅ ${envVar}: 已設定`);
-  }
-}
-
-console.log('🔍 步驟 3: 初始化 LINE 客戶端...');
-try {
-  const config = {
-    channelSecret: process.env.LINE_CHANNEL_SECRET,
-    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
-  };
-  const client = new line.messagingApi.MessagingApiClient({
-    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
-  });
-  console.log('✅ LINE 客戶端初始化完成');
-} catch (error) {
-  console.error('❌ LINE 客戶端初始化失敗:', error);
-  process.exit(1);
-}
-
-console.log('🔍 步驟 4: 初始化 Express 應用...');
-try {
-  const app = express();
-  const port = process.env.PORT || 3000;
-  console.log('✅ Express 應用初始化完成');
-} catch (error) {
-  console.error('❌ Express 應用初始化失敗:', error);
-  process.exit(1);
-}
-
-console.log('🔍 步驟 5: 設定中間件...');
-// 你的中間件設定
-
-console.log('🔍 步驟 6: 啟動伺服器...');
-try {
-  app.listen(port, () => {
-    console.log(`✅ 伺服器啟動成功，監聽埠口: ${port}`);
-    console.log('🎉 LINE Bot 完全啟動完成！');
-  });
-} catch (error) {
-  console.error('❌ 伺服器啟動失敗:', error);
-  process.exit(1);
-}
-
-console.log('=== LINE Bot 啟動開始 ===');
-console.log('Node.js 版本:', process.version);
-console.log('當前時間:', new Date().toISOString());
-
-require('dotenv').config();
-
-// 必要的模組導入
-
-const line = require('@line/bot-sdk');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { JWT } = require('google-auth-library');
-const cron = require('node-cron');
-const moment = require('moment-timezone');
-
-// 設定預設時區為日本時間
-moment.tz.setDefault('Asia/Tokyo');
+console.log('🔍 步驟 1: 模組載入完成');
 
 // 環境變數驗證
+console.log('🔍 步驟 2: 檢查環境變數...');
 function validateEnvironment() {
   const required = [
-    'CHANNEL_ACCESS_TOKEN',
-    'CHANNEL_SECRET',
+    'LINE_CHANNEL_SECRET',          // 統一使用 LINE_ 前綴
+    'LINE_CHANNEL_ACCESS_TOKEN',    // 統一使用 LINE_ 前綴  
     'GOOGLE_SPREADSHEET_ID',
     'GOOGLE_SERVICE_ACCOUNT_EMAIL',
     'GOOGLE_PRIVATE_KEY'
@@ -122,18 +44,70 @@ function validateEnvironment() {
     if (!process.env[key]) {
       console.error(`❌ 缺少環境變數: ${key}`);
       process.exit(1);
+    } else {
+      console.log(`✅ ${key}: 已設定`);
     }
   }
   console.log('✅ 環境變數驗證通過');
 }
 
-// Google Sheets 設定
-const serviceAccountAuth = new JWT({
-  email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
+// 執行環境變數驗證
+validateEnvironment();
 
+// Google Sheets 設定
+console.log('🔍 步驟 3: 初始化 Google Sheets...');
+try {
+  const serviceAccountAuth = new JWT({
+    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+  console.log('✅ Google Sheets 驗證初始化完成');
+} catch (error) {
+  console.error('❌ Google Sheets 初始化失敗:', error);
+  process.exit(1);
+}
+
+console.log('🔍 步驟 4: 初始化 LINE 客戶端...');
+try {
+  const config = {
+    channelSecret: process.env.LINE_CHANNEL_SECRET,
+    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
+  };
+  
+  const client = new line.messagingApi.MessagingApiClient({
+    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
+  });
+  
+  console.log('✅ LINE 客戶端初始化完成');
+} catch (error) {
+  console.error('❌ LINE 客戶端初始化失敗:', error);
+  process.exit(1);
+}
+
+console.log('🔍 步驟 5: 初始化 Express 應用...');
+try {
+  const app = express();
+  const port = process.env.PORT || 3000;
+  
+  // 設定中間件
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+  
+  console.log('✅ Express 應用初始化完成');
+  
+  console.log('🔍 步驟 6: 啟動伺服器...');
+  app.listen(port, () => {
+    console.log(`✅ 伺服器啟動成功，監聽埠口: ${port}`);
+    console.log('🎉 LINE Bot 完全啟動完成！');
+  });
+  
+} catch (error) {
+  console.error('❌ Express 初始化失敗:', error);
+  process.exit(1);
+}
+
+// 在這裡繼續加入你的其他業務邏輯...
 // === 雙語指令支援 ===
 const COMMAND_MAPPING = {
   // 中文指令
