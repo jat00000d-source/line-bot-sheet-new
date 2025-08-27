@@ -1,3 +1,7 @@
+console.log('=== LINE Bot 啟動開始 ===');
+console.log('Node.js 版本:', process.version);
+console.log('當前時間:', new Date().toISOString());
+
 require('dotenv').config();
 
 // 必要的模組導入
