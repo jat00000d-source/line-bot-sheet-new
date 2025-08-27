@@ -6,6 +6,9 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const cron = require('node-cron');
 
+// 設定預設時區為日本時間
+moment.tz.setDefault('Asia/Tokyo');
+
 // 環境變數驗證
 function validateEnvironment() {
   const required = [
@@ -330,9 +333,6 @@ class LineBotApp {
     this.setupRoutes();
     this.startScheduler();
   }
-
-// 設定預設時區為日本時間
-moment.tz.setDefault('Asia/Tokyo');
 
 // 環境變數驗證
 function validateEnvironment() {
@@ -1333,7 +1333,7 @@ class GoogleSheetsReminderController {
           ? `リマインダー削除時にエラーが発生しました: ${error.message}`
           : `刪除提醒時發生錯誤: ${error.message}`
           };
-    }
+ }
   }
 }   // ✅ 關掉 class
 
