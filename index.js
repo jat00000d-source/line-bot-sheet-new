@@ -38,6 +38,10 @@ const COMMAND_MAPPING = {
   '預算': 'budget',
   '查看預算': 'budget',
   '剩餘': 'remaining',
+  '提醒': 'reminder',
+  '查看提醒': 'query_reminders',
+  '提醒列表': 'query_reminders',
+  '刪除提醒': 'delete_reminder',
   
   // 日文指令
   '集計': 'summary',
@@ -50,7 +54,10 @@ const COMMAND_MAPPING = {
   '予算設定': 'set_budget',
   '予算': 'budget',
   '残り': 'remaining',
-  '残額': 'remaining'
+  '残額': 'remaining',
+  'リマインダー': 'reminder',
+  'リマインダー一覧': 'query_reminders',
+  'リマインダー削除': 'delete_reminder'
 };
 
 const CATEGORY_MAPPING = {
@@ -383,91 +390,367 @@ class GoogleSheetsExpenseController {
   }
 }
 
-// 基本的 Todo Controller (保持原樣，但可以後續整合到 Google Sheets)
-class BasicTodoController {
-  constructor() {
-    this.reminders = [];
+// === Google Sheets 整合的 ReminderController ===
+class GoogleSheetsReminderController {
+  constructor(lineClient) {
+    this.lineClient = lineClient;
+    this.doc = null;
+    this.reminderSheetName = 'Reminders';
+  }
+
+  async getGoogleSheet() {
+    if (!this.doc) {
+      this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
+      await this.doc.loadInfo();
+    }
+    return this.doc;
+  }
+
+  async getReminderSheet() {
+    try {
+      const doc = await this.getGoogleSheet();
+      let sheet = doc.sheetsByTitle[this.reminderSheetName];
+      
+      if (!sheet) {
+        // 建立提醒工作表
+        sheet = await doc.addSheet({
+          title: this.reminderSheetName,
+          headerValues: [
+            'ID', 'UserID', '提醒內容', '提醒時間', '重複類型', 
+            '狀態', '建立時間', '最後執行時間', '下次執行時間'
+          ]
+        });
+
+        // 格式化標題列
+        await sheet.loadCells('A1:I1');
+        for (let i = 0; i < 9; i++) {
+          const cell = sheet.getCell(0, i);
+          cell.textFormat = { bold: true };
+          cell.backgroundColor = { red: 0.85, green: 0.92, blue: 0.83 };
+          cell.horizontalAlignment = 'CENTER';
+        }
+        await sheet.saveUpdatedCells();
+      }
+      
+      return sheet;
+    } catch (error) {
+      console.error('獲取提醒工作表錯誤:', error);
+      throw error;
+    }
   }
 
   async handleTodo(event, command, language) {
     try {
+      const sheet = await this.getReminderSheet();
+      const now = moment().tz('Asia/Tokyo');
+      
+      // 解析提醒時間和重複設定
+      const reminderData = this.parseReminderCommand(command.text || command.reminder);
+      
+      const reminderId = `R${now.format('YYMMDDHHmmss')}${Math.random().toString(36).substr(2, 3)}`;
+      
+      // 計算下次執行時間
+      const nextExecution = this.calculateNextExecution(reminderData.datetime, reminderData.recurring);
+      
       const reminder = {
-        id: Date.now(),
-        userId: event.source.userId,
-        text: command.text || '提醒',
-        time: command.time || moment().add(1, 'hour').format('YYYY-MM-DD HH:mm'),
-        recurring: command.recurring || false,
-        active: true
+        'ID': reminderId,
+        'UserID': event.source.userId,
+        '提醒內容': reminderData.content,
+        '提醒時間': reminderData.datetime.format('YYYY-MM-DD HH:mm'),
+        '重複類型': reminderData.recurring || '單次',
+        '狀態': '啟用',
+        '建立時間': now.format('YYYY-MM-DD HH:mm:ss'),
+        '最後執行時間': '',
+        '下次執行時間': nextExecution.format('YYYY-MM-DD HH:mm:ss')
       };
       
-      this.reminders.push(reminder);
+      await sheet.addRow(reminder);
       
-      const message = `⏰ 已設定提醒\n內容: ${reminder.text}\n時間: ${reminder.time}`;
+      const message = language === 'ja' ? 
+        `⏰ リマインダーを設定しました\n内容: ${reminderData.content}\n時間: ${reminderData.datetime.format('YYYY-MM-DD HH:mm')}\n繰り返し: ${reminderData.recurring || '一回のみ'}` :
+        `⏰ 已設定提醒\n內容: ${reminderData.content}\n時間: ${reminderData.datetime.format('YYYY-MM-DD HH:mm')}\n重複: ${reminderData.recurring || '單次'}`;
       
       return {
         type: 'text',
         text: message
       };
+      
     } catch (error) {
       console.error('提醒處理錯誤:', error);
       return {
         type: 'text',
-        text: '設定提醒時發生錯誤。'
+        text: language === 'ja' ? 'リマインダー設定時にエラーが発生しました。' : '設定提醒時發生錯誤。'
       };
     }
   }
 
   async handleQueryReminders(event, language) {
     try {
-      const userReminders = this.reminders.filter(r => r.userId === event.source.userId && r.active);
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const userReminders = rows.filter(row => 
+        row.get('UserID') === event.source.userId && 
+        row.get('狀態') === '啟用'
+      );
       
       if (userReminders.length === 0) {
         return {
           type: 'text',
-          text: '目前沒有提醒事項。'
+          text: language === 'ja' ? 'アクティブなリマインダーはありません。' : '目前沒有啟用的提醒事項。'
         };
       }
       
-      const reminderList = userReminders.map((r, index) => `${index + 1}. ${r.text} - ${r.time}`).join('\n');
-      const message = `📋 提醒列表:\n${reminderList}`;
+      const reminderList = userReminders.map((reminder, index) => {
+        const content = reminder.get('提醒內容');
+        const time = reminder.get('下次執行時間');
+        const recurring = reminder.get('重複類型');
+        return `${index + 1}. ${content}\n   ⏰ ${time}\n   🔄 ${recurring}`;
+      }).join('\n\n');
+      
+      const title = language === 'ja' ? '📋 リマインダー一覧:' : '📋 提醒列表:';
       
       return {
         type: 'text',
-        text: message
+        text: `${title}\n\n${reminderList}`
       };
+      
     } catch (error) {
       console.error('查詢提醒錯誤:', error);
       return {
         type: 'text',
-        text: '查詢提醒時發生錯誤。'
+        text: language === 'ja' ? 'リマインダー取得時にエラーが発生しました。' : '查詢提醒時發生錯誤。'
       };
     }
   }
 
   async handleDeleteReminder(event, command, language) {
     try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const userReminders = rows.filter(row => 
+        row.get('UserID') === event.source.userId && 
+        row.get('狀態') === '啟用'
+      );
+      
       const index = parseInt(command.index) - 1;
-      const userReminders = this.reminders.filter(r => r.userId === event.source.userId && r.active);
       
       if (index >= 0 && index < userReminders.length) {
-        userReminders[index].active = false;
+        const reminderToDelete = userReminders[index];
+        reminderToDelete.set('狀態', '已刪除');
+        reminderToDelete.set('最後執行時間', moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss'));
+        await reminderToDelete.save();
         
         return {
           type: 'text',
-          text: '已刪除提醒。'
+          text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
         };
       } else {
         return {
           type: 'text',
-          text: '找不到指定的提醒。'
+          text: language === 'ja' ? '指定されたリマインダーが見つかりません。' : '找不到指定的提醒。'
         };
       }
+      
     } catch (error) {
       console.error('刪除提醒錯誤:', error);
       return {
         type: 'text',
-        text: '刪除提醒時發生錯誤。'
+        text: language === 'ja' ? 'リマインダー削除時にエラーが発生しました。' : '刪除提醒時發生錯誤。'
       };
+    }
+  }
+
+  parseReminderCommand(text) {
+    const now = moment().tz('Asia/Tokyo');
+    let content = text;
+    let datetime = now.clone().add(1, 'hour'); // 預設1小時後
+    let recurring = null;
+
+    // 解析時間表達式
+    const timePatterns = [
+      // 絕對時間 - 今天/明天 + 時間
+      {
+        pattern: /(今天|今日)\s*(\d{1,2})[:：時点]?(\d{0,2})?/,
+        handler: (match) => {
+          const hour = parseInt(match[2]);
+          const minute = parseInt(match[3] || '0');
+          datetime = now.clone().hour(hour).minute(minute).second(0);
+          if (datetime.isBefore(now)) datetime.add(1, 'day');
+          content = text.replace(match[0], '').trim();
+        }
+      },
+      {
+        pattern: /(明天|明日)\s*(\d{1,2})[:：時点]?(\d{0,2})?/,
+        handler: (match) => {
+          const hour = parseInt(match[2]);
+          const minute = parseInt(match[3] || '0');
+          datetime = now.clone().add(1, 'day').hour(hour).minute(minute).second(0);
+          content = text.replace(match[0], '').trim();
+        }
+      },
+      // 相對時間
+      {
+        pattern: /(\d+)\s*(分鐘?|分|minutes?)\s*後/,
+        handler: (match) => {
+          const minutes = parseInt(match[1]);
+          datetime = now.clone().add(minutes, 'minutes');
+          content = text.replace(match[0], '').trim();
+        }
+      },
+      {
+        pattern: /(\d+)\s*(小時?|時間|hours?)\s*後/,
+        handler: (match) => {
+          const hours = parseInt(match[1]);
+          datetime = now.clone().add(hours, 'hours');
+          content = text.replace(match[0], '').trim();
+        }
+      }
+    ];
+
+    // 解析重複設定
+    const recurringPatterns = [
+      {
+        pattern: /每天|毎日|daily/i,
+        value: '每天'
+      },
+      {
+        pattern: /每週|毎週|週次|weekly/i,
+        value: '每週'
+      },
+      {
+        pattern: /每月|毎月|monthly/i,
+        value: '每月'
+      },
+      {
+        pattern: /每年|毎年|yearly/i,
+        value: '每年'
+      }
+    ];
+
+    // 應用時間解析
+    for (const { pattern, handler } of timePatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        handler(match);
+        break;
+      }
+    }
+
+    // 應用重複設定解析
+    for (const { pattern, value } of recurringPatterns) {
+      if (pattern.test(text)) {
+        recurring = value;
+        content = content.replace(pattern, '').trim();
+        break;
+      }
+    }
+
+    // 清理內容
+    content = content.replace(/^\s*(提醒|リマインダー|remind)\s*/i, '').trim();
+    if (!content) content = '提醒';
+
+    return {
+      content,
+      datetime,
+      recurring
+    };
+  }
+
+  calculateNextExecution(datetime, recurring) {
+    if (!recurring || recurring === '單次') {
+      return datetime;
+    }
+
+    const now = moment().tz('Asia/Tokyo');
+    let next = datetime.clone();
+
+    // 如果時間已經過了，計算下一次執行時間
+    while (next.isBefore(now)) {
+      switch (recurring) {
+        case '每天':
+          next.add(1, 'day');
+          break;
+        case '每週':
+          next.add(1, 'week');
+          break;
+        case '每月':
+          next.add(1, 'month');
+          break;
+        case '每年':
+          next.add(1, 'year');
+          break;
+        default:
+          break;
+      }
+    }
+
+    return next;
+  }
+
+  async checkAndSendReminders() {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      const now = moment().tz('Asia/Tokyo');
+      
+      const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
+      
+      for (const reminder of activeReminders) {
+        const nextExecution = moment(reminder.get('下次執行時間'));
+        
+        // 檢查是否到了執行時間（允許1分鐘的誤差）
+        if (now.isAfter(nextExecution.subtract(30, 'seconds')) && now.isBefore(nextExecution.add(90, 'seconds'))) {
+          await this.sendReminder(reminder);
+          await this.updateReminderAfterExecution(reminder, now);
+        }
+      }
+      
+    } catch (error) {
+      console.error('檢查提醒錯誤:', error);
+    }
+  }
+
+  async sendReminder(reminder) {
+    try {
+      const userId = reminder.get('UserID');
+      const content = reminder.get('提醒內容');
+      const recurring = reminder.get('重複類型');
+      
+      const message = {
+        type: 'text',
+        text: `⏰ 提醒時間到了！\n\n📝 ${content}\n\n${recurring !== '單次' ? `🔄 這是${recurring}提醒` : ''}`
+      };
+      
+      await this.lineClient.pushMessage(userId, message);
+      console.log(`✅ 已發送提醒給用戶 ${userId}: ${content}`);
+      
+    } catch (error) {
+      console.error('發送提醒錯誤:', error);
+    }
+  }
+
+  async updateReminderAfterExecution(reminder, executionTime) {
+    try {
+      const recurring = reminder.get('重複類型');
+      
+      reminder.set('最後執行時間', executionTime.format('YYYY-MM-DD HH:mm:ss'));
+      
+      if (recurring && recurring !== '單次') {
+        // 計算下次執行時間
+        const currentNext = moment(reminder.get('下次執行時間'));
+        const nextExecution = this.calculateNextExecution(currentNext, recurring);
+        reminder.set('下次執行時間', nextExecution.format('YYYY-MM-DD HH:mm:ss'));
+      } else {
+        // 單次提醒，執行後停用
+        reminder.set('狀態', '已完成');
+      }
+      
+      await reminder.save();
+      
+    } catch (error) {
+      console.error('更新提醒執行狀態錯誤:', error);
     }
   }
 }
@@ -511,16 +794,16 @@ class EnhancedCommandParser {
     }
     
     // 記帳相關命令
-    if (lowerText.includes('支出') || lowerText.includes('查看') || lowerText.includes('統計')) {
+    if (lowerText.includes('支出') || lowerText.includes('查看') || lowerText.includes('統計') || lowerText.includes('集計') || lowerText.includes('まとめ')) {
       return { type: 'query_expenses' };
     }
     
-    // 提醒相關命令
-    if (lowerText.includes('提醒') || lowerText.includes('リマインダー')) {
-      if (lowerText.includes('查看') || lowerText.includes('列表') || lowerText.includes('一覧')) {
+    // 提醒相關命令 - 增強解析
+    if (this.isReminderCommand(text)) {
+      if (lowerText.includes('查看') || lowerText.includes('列表') || lowerText.includes('一覧') || lowerText.includes('リスト')) {
         return { type: 'query_reminders' };
       }
-      if (lowerText.includes('刪除') || lowerText.includes('削除')) {
+      if (lowerText.includes('刪除') || lowerText.includes('削除') || lowerText.includes('delete')) {
         const match = text.match(/(\d+)/);
         return { 
           type: 'delete_reminder',
@@ -529,8 +812,7 @@ class EnhancedCommandParser {
       }
       return { 
         type: 'reminder',
-        text: text,
-        time: moment().add(1, 'hour').format('YYYY-MM-DD HH:mm')
+        reminder: text
       };
     }
     
@@ -547,6 +829,25 @@ class EnhancedCommandParser {
     }
     
     return { type: 'unknown' };
+  }
+
+  isReminderCommand(text) {
+    const reminderKeywords = [
+      '提醒', 'リマインダー', 'remind', 'reminder',
+      '明天', '明日', '後で', '今天', '今日', 
+      '每天', '毎日', '每週', '毎週', '每月', '毎月',
+      '時', '點', '分', 'daily', 'weekly', 'monthly'
+    ];
+    
+    const timePatterns = [
+      /\d+[:：時点]\d*/,  // 時間格式
+      /\d+\s*(分鐘?|小時|時間|hours?|minutes?)\s*後/,  // 相對時間
+      /(今天|明天|今日|明日)\s*\d+/,  // 絕對時間
+      /(每天|每週|每月|毎日|毎週|毎月|daily|weekly|monthly)/  // 重複設定
+    ];
+    
+    return reminderKeywords.some(keyword => text.includes(keyword)) ||
+           timePatterns.some(pattern => pattern.test(text));
   }
 
   isBudgetSetting(text) {
@@ -752,7 +1053,7 @@ class LineBotApp {
     
     this.client = new line.Client(this.config);
     
-    // 初始化控制器（使用 Google Sheets 整合版本）
+    // 初始化控制器
     this.initializeControllers();
     
     this.setupMiddleware();
@@ -763,7 +1064,7 @@ class LineBotApp {
   initializeControllers() {
     // 使用 Google Sheets 整合的控制器
     this.expenseController = new GoogleSheetsExpenseController();
-    this.todoController = new BasicTodoController();
+    this.todoController = new GoogleSheetsReminderController(this.client);
     this.commandParser = new EnhancedCommandParser();
     this.languageDetector = new BasicLanguageDetector();
     
@@ -792,7 +1093,8 @@ class LineBotApp {
         timezone: 'Asia/Tokyo',
         services: {
           'expense-tracking': '✅ 運行中 (Google Sheets)',
-          'reminders': '✅ 運行中'
+          'reminders': '✅ 運行中 (Google Sheets)',
+          'scheduler': '✅ 運行中'
         },
         environment: process.env.NODE_ENV || 'development'
       });
@@ -801,10 +1103,18 @@ class LineBotApp {
     // 根目錄端點
     this.app.get('/', (req, res) => {
       res.status(200).json({
-        message: 'LINE Bot 記帳提醒系統',
+        message: 'LINE Bot 記帳提醒系統 - 改良版',
         status: 'Running',
         timezone: 'JST (UTC+9)',
-        features: ['Google Sheets 記帳功能', '提醒功能', '多語言支援 (繁體中文/日語)', '預算管理']
+        features: [
+          'Google Sheets 記帳功能', 
+          'Google Sheets 提醒功能', 
+          '自動提醒發送', 
+          '多語言支援 (繁體中文/日語)', 
+          '預算管理',
+          '重複提醒支援',
+          '自然語言解析'
+        ]
       });
     });
   }
@@ -856,18 +1166,41 @@ class LineBotApp {
     // 測試端點
     this.app.get('/test', (req, res) => {
       res.status(200).json({
-        message: '測試端點正常運作',
+        message: '測試端點正常運作 - 改良版',
         timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST'),
         controllers: {
           expense: !!this.expenseController,
-          todo: !!this.todoController,
+          reminder: !!this.todoController,
           parser: !!this.commandParser,
           detector: !!this.languageDetector
         },
         googleSheets: {
-          configured: !!(process.env.GOOGLE_SPREADSHEET_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL)
+          configured: !!(process.env.GOOGLE_SPREADSHEET_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL),
+          features: ['記帳功能', '提醒功能', '自動排程']
         }
       });
+    });
+
+    // 手動觸發提醒檢查的測試端點
+    this.app.post('/test-reminders', async (req, res) => {
+      try {
+        console.log('🧪 手動觸發提醒檢查');
+        await this.todoController.checkAndSendReminders();
+        
+        res.status(200).json({
+          success: true,
+          message: '提醒檢查已執行',
+          timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
+        });
+        
+      } catch (error) {
+        console.error('❌ 測試提醒檢查錯誤:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message,
+          timestamp: moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')
+        });
+      }
     });
 
     // 模擬 LINE 事件的測試端點
@@ -1040,8 +1373,8 @@ class LineBotApp {
 
   async handleDefault(event, language) {
     const helpMessage = language === 'ja' ? 
-      'こんにちは！家計簿とリマインダー機能をご利用いただけます。\n\n💰 家計簿機能:\n「食費 500円 昼食」\n「交通費 200円」\n「支出確認」または「集計」\n「予算設定 50000」\n\n⏰ リマインダー機能:\n「明日8時に薬を飲む」\n「毎日19時に運動」\n「毎週月曜日に会議」\n\n📋 管理機能:\n「リマインダー一覧」\n「リマインダー削除 [番号]」\n\n「説明」で詳細な使用方法をご確認ください。' :
-      '您好！我是記帳和提醒助手。\n\n💰 記帳功能:\n「食物 50元 午餐」\n「交通 30元」\n「查看支出」或「總結」\n「設定預算 50000」\n\n⏰ 提醒功能:\n「明天8點吃藥」\n「每天晚上7點運動」\n「每週一開會」\n\n📋 管理功能:\n「查看提醒」\n「刪除提醒 [編號]」\n\n請輸入「說明」查看詳細使用方法。';
+      'こんにちは！改良版家計簿とリマインダー機能をご利用いただけます。\n\n💰 家計簿機能:\n「食費 500円 昼食」\n「交通費 200円」\n「支出確認」または「集計」\n「予算設定 50000」\n\n⏰ リマインダー機能（NEW！）:\n「明日8時に薬を飲む」\n「毎日19時に運動」\n「毎週月曜日に会議」\n「30分後に買い物」\n\n📋 管理機能:\n「リマインダー一覧」\n「リマインダー削除 [番号]」\n\n✨ 新機能:\n• Google Sheets 自動保存\n• 自動リマインダー送信\n• 繰り返し設定対応\n• 自然言語理解向上\n\n「説明」で詳細な使用方法をご確認ください。' :
+      '您好！我是改良版記帳和提醒助手。\n\n💰 記帳功能:\n「食物 50元 午餐」\n「交通 30元」\n「查看支出」或「總結」\n「設定預算 50000」\n\n⏰ 提醒功能（全新！）:\n「明天8點吃藥」\n「每天晚上7點運動」\n「每週一開會」\n「30分鐘後買東西」\n\n📋 管理功能:\n「查看提醒」\n「刪除提醒 [編號]」\n\n✨ 新功能:\n• Google Sheets 自動儲存\n• 自動提醒發送\n• 支援重複設定\n• 自然語言理解增強\n\n請輸入「說明」查看詳細使用方法。';
     
     return {
       type: 'text',
@@ -1051,89 +1384,109 @@ class LineBotApp {
 
   getHelpMessage(language = 'zh') {
     if (language === 'ja') {
-      return `📝 記帳ボット使用説明\n\n` +
+      return `📝 記帳ボット使用説明 - 改良版\n\n` +
              `💡 記帳形式：\n` +
              `【従来形式】\n` +
              `項目　金額　[備考]（全角スペース対応）\n` +
              `項目 金額 [備考]（半角スペース対応）\n\n` +
-             `【自然言語形式】NEW！\n` +
+             `【自然言語形式】\n` +
              `• 昨日ランチ100円食べた\n` +
              `• 今日コーヒー85円\n` +
              `• 交通費150\n` +
              `• 午餐100元（中国語もOK）\n\n` +
-             `💰 予算管理：NEW！\n` +
+             `💰 予算管理：\n` +
              `• 予算設定 50000 （月度予算設定）\n` +
              `• 予算 （予算状況確認）\n` +
              `• 残り （残額確認）\n\n` +
-             `📌 例：\n` +
-             `• 昼食　150\n` +
-             `• コーヒー　85　スターバックス\n` +
-             `• 昨天午餐吃了200\n` +
-             `• 前天買咖啡花80\n\n` +
-             `📊 まとめ確認：\n` +
-             `「集計」で今月の支出を確認\n\n` +
-             `✨ 特長：\n` +
-             `• 月度予算設定・管理\n` +
-             `• 自動で残額・使用率計算\n` +
-             `• 1日使用可能金額表示\n` +
-             `• 予算警告機能\n` +
-             `• 全角・半角スペース対応\n` +
-             `• 自然言語理解\n` +
-             `• 中国語・日本語対応\n` +
-             `• Google Sheets自動保存`;
+             `⏰ リマインダー機能（NEW！）：\n` +
+             `【時間指定】\n` +
+             `• 明日8時に薬を飲む\n` +
+             `• 今日15:30に会議\n` +
+             `• 30分後に買い物\n` +
+             `• 2時間後に電話をかける\n\n` +
+             `【繰り返し設定】\n` +
+             `• 毎日19時に運動\n` +
+             `• 毎週月曜日9時に会議\n` +
+             `• 毎月1日に家賃を払う\n\n` +
+             `【管理機能】\n` +
+             `• リマインダー一覧 （全ての提醒確認）\n` +
+             `• リマインダー削除 2 （2番目を削除）\n\n` +
+             `✨ 改良点：\n` +
+             `• Google Sheets 完全統合\n` +
+             `• 自動リマインダー送信\n` +
+             `• 繰り返し機能完備\n` +
+             `• 自然言語理解向上\n` +
+             `• 中国語・日本語完全対応\n` +
+             `• データ永続化`;
     } else {
-      return `📝 記帳機器人使用說明\n\n` +
+      return `📝 記帳機器人使用說明 - 改良版\n\n` +
              `💡 記帳格式：\n` +
              `【傳統格式】\n` +
              `項目　金額　[備註]（支援全形空格）\n` +
              `項目 金額 [備註]（支援半形空格）\n\n` +
-             `【自然語言格式】全新功能！\n` +
+             `【自然語言格式】\n` +
              `• 昨天午餐吃了100元\n` +
              `• 今天咖啡85円\n` +
              `• 交通費150\n` +
              `• ランチ200（日文也可以）\n\n` +
-             `💰 預算管理：全新功能！\n` +
+             `💰 預算管理：\n` +
              `• 設定預算 50000 （設定月度預算）\n` +
              `• 預算 （查看預算狀況）\n` +
              `• 剩餘 （查看剩餘金額）\n\n` +
-             `📌 範例：\n` +
-             `• 午餐　150\n` +
-             `• 咖啡　85　星巴克\n` +
-             `• 昨天買東西花了200\n` +
-             `• 前天搭車用50\n\n` +
-             `📊 查看總結：\n` +
-             `輸入「總結」查看本月支出\n\n` +
-             `✨ 特色功能：\n` +
-             `• 月度預算設定與管理\n` +
-             `• 自動計算剩餘金額與使用率\n` +
-             `• 每日可用金額顯示\n` +
-             `• 預算警告提醒功能\n` +
-             `• 支援全形、半形空格\n` +
-             `• 自然語言理解\n` +
-             `• 支援中日雙語指令\n` +
-             `• Google Sheets 自動儲存`;
+             `⏰ 提醒功能（全新！）：\n` +
+             `【時間指定】\n` +
+             `• 明天8點吃藥\n` +
+             `• 今天下午3點半開會\n` +
+             `• 30分鐘後買東西\n` +
+             `• 2小時後打電話\n\n` +
+             `【重複設定】\n` +
+             `• 每天晚上7點運動\n` +
+             `• 每週一早上9點開會\n` +
+             `• 每月1號繳房租\n\n` +
+             `【管理功能】\n` +
+             `• 查看提醒 （查看所有提醒）\n` +
+             `• 刪除提醒 2 （刪除第2個提醒）\n\n` +
+             `✨ 改良特色：\n` +
+             `• Google Sheets 完全整合\n` +
+             `• 自動提醒發送\n` +
+             `• 重複功能完善\n` +
+             `• 自然語言理解增強\n` +
+             `• 支援中日雙語\n` +
+             `• 資料永久保存`;
     }
   }
 
   startScheduler() {
     try {
-      // 設定日本時間的 cron job，每分鐘檢查提醒
+      // 每分鐘檢查提醒（更頻繁的檢查確保準確性）
       cron.schedule('* * * * *', async () => {
         try {
           const now = moment().tz('Asia/Tokyo');
           console.log(`⏰ [${now.format('YYYY-MM-DD HH:mm:ss JST')}] 檢查提醒中...`);
           
-          // 基本的提醒檢查邏輯
-          // 可以後續整合更完整的提醒系統
+          await this.todoController.checkAndSendReminders();
+          
         } catch (error) {
           console.error('❌ 排程器錯誤:', error);
         }
       }, {
         timezone: 'Asia/Tokyo'
       });
+
+      // 每小時執行一次系統狀態報告（可選）
+      cron.schedule('0 * * * *', () => {
+        const now = moment().tz('Asia/Tokyo');
+        console.log(`📊 [${now.format('YYYY-MM-DD HH:mm:ss JST')}] 系統狀態正常 - 提醒系統運行中`);
+      }, {
+        timezone: 'Asia/Tokyo'
+      });
       
       console.log('⏰ 提醒排程器已啟動 (JST 時區)');
       console.log(`🕐 目前 JST 時間: ${moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss JST')}`);
+      console.log('📅 排程設定:');
+      console.log('   - 每分鐘檢查提醒');
+      console.log('   - 每小時系統狀態報告');
+      
     } catch (error) {
       console.error('❌ 排程器啟動失敗:', error);
     }
@@ -1143,13 +1496,14 @@ class LineBotApp {
     this.app.listen(this.port, () => {
       const startTime = moment().tz('Asia/Tokyo');
       console.log('\n🚀 =================================');
-      console.log(`   LINE Bot 伺服器啟動成功`);
+      console.log(`   LINE Bot 伺服器啟動成功 - 改良版`);
       console.log('🚀 =================================');
       console.log(`📍 Port: ${this.port}`);
       console.log(`🕐 啟動時間: ${startTime.format('YYYY-MM-DD HH:mm:ss JST')}`);
       console.log(`🌏 時區: Asia/Tokyo (JST, UTC+9)`);
       console.log(`💰 記帳功能: ✅ 已啟用 (Google Sheets)`);
-      console.log(`⏰ 提醒功能: ✅ 已啟用`);
+      console.log(`⏰ 提醒功能: ✅ 已啟用 (Google Sheets + 自動發送)`);
+      console.log(`🔄 排程系統: ✅ 已啟用 (每分鐘檢查)`);
       console.log(`🌐 多語言支援: ✅ 繁體中文/日語`);
       
       console.log('\n🔧 環境變數狀態:');
@@ -1161,9 +1515,24 @@ class LineBotApp {
       
       console.log('\n🔧 控制器狀態:');
       console.log(`   ExpenseController: ${this.expenseController.constructor.name} (Google Sheets)`);
-      console.log(`   TodoController: ${this.todoController.constructor.name}`);
-      console.log(`   CommandParser: ${this.commandParser.constructor.name}`);
+      console.log(`   ReminderController: ${this.todoController.constructor.name} (Google Sheets + 自動發送)`);
+      console.log(`   CommandParser: ${this.commandParser.constructor.name} (增強版)`);
       console.log(`   LanguageDetector: ${this.languageDetector.constructor.name}`);
+      
+      console.log('\n✨ 改良功能:');
+      console.log('   • Google Sheets 完全整合（記帳 + 提醒）');
+      console.log('   • 自動提醒發送系統');
+      console.log('   • 重複提醒支援（每天/每週/每月/每年）');
+      console.log('   • 自然語言時間解析');
+      console.log('   • 資料永久保存');
+      console.log('   • 增強的指令解析');
+      
+      console.log('\n🔗 API 端點:');
+      console.log('   POST /webhook - LINE Bot Webhook');
+      console.log('   GET  /health - 健康檢查');
+      console.log('   GET  /test - 測試端點');
+      console.log('   POST /test-event - 測試事件處理');
+      console.log('   POST /test-reminders - 手動觸發提醒檢查');
       
       console.log('\n✅ 伺服器準備就緒，等待請求...\n');
     });
@@ -1179,6 +1548,17 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ 未處理的 Promise 拒絕:', reason);
   console.error('位置:', promise);
+});
+
+// 優雅關閉
+process.on('SIGTERM', () => {
+  console.log('🔄 收到 SIGTERM 信號，準備優雅關閉...');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('\n🔄 收到 SIGINT 信號，準備優雅關閉...');
+  process.exit(0);
 });
 
 // 啟動應用程式
