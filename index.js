@@ -98,7 +98,7 @@ console.log('當前時間:', new Date().toISOString());
 require('dotenv').config();
 
 // 必要的模組導入
-const express = require('express');
+
 const line = require('@line/bot-sdk');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
