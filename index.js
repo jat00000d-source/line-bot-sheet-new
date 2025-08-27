@@ -864,7 +864,7 @@ class GoogleSheetsReminderController {
       text: language === 'ja' ? `リマインダー削除時にエラーが発生しました: ${error.message}` : `刪除提醒時發生錯誤: ${error.message}`
     };
   }
-}, // <- 添加逗號分隔方法
+}, // <- 正確的分隔
 
 parseReminderCommand(text) {
   const now = moment().tz('Asia/Tokyo');
