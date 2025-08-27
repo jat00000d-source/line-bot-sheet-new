@@ -1,9 +1,9 @@
-// 在檔案最開頭直接載入
+// 檔案開頭
 const line = require('@line/bot-sdk');
 const express = require('express');
 
 console.log('=== LINE Bot 啟動開始 ===');
-// ... 其他程式碼
+// 其餘程式碼...
 
 console.log('=== LINE Bot 啟動開始 ===');
 console.log('Node.js 版本:', process.version);
