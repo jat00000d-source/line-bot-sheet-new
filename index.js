@@ -1,3 +1,4 @@
+require('dotenv').config();
 // 必要的模組導入
 const express = require('express');
 const line = require('@line/bot-sdk');
@@ -329,7 +330,7 @@ class LineBotApp {
     this.setupRoutes();
     this.startScheduler();
   }
-require('dotenv').config();
+
 
 // 必要的模組導入
 const express = require('express');
