@@ -785,6 +785,21 @@ class LineBotApp {
     this.app.get('/health', (req, res) => {
       const now = moment().tz('Asia/Tokyo');
       
+      res.status(200).json({ 
+        status: 'OK', 
+        timestamp: now.toISOString(),
+        localTime: now.format('YYYY-MM-DD HH:mm:ss JST'),
+        timezone: 'Asia/Tokyo',
+        services: {
+          'expense-tracking': '✅ 運行中 (Google Sheets)',
+          'reminders': '✅ 運行中'
+        },
+        environment: process.env.NODE_ENV || 'development'
+      });
+    });
+
+    // 根目錄端點
+    this.app.get('/', (req, res) => {
       res.status(200).json({
         message: 'LINE Bot 記帳提醒系統',
         status: 'Running',
@@ -1170,19 +1185,4 @@ process.on('unhandledRejection', (reason, promise) => {
 const app = new LineBotApp();
 app.start();
 
-module.exports = LineBotApp;({ 
-        status: 'OK', 
-        timestamp: now.toISOString(),
-        localTime: now.format('YYYY-MM-DD HH:mm:ss JST'),
-        timezone: 'Asia/Tokyo',
-        services: {
-          'expense-tracking': '✅ 運行中 (Google Sheets)',
-          'reminders': '✅ 運行中'
-        },
-        environment: process.env.NODE_ENV || 'development'
-      });
-    });
-
-    // 根目錄端點
-    this.app.get('/', (req, res) => {
-      res.status(200).json
+module.exports = LineBotApp;
