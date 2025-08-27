@@ -333,6 +333,7 @@ class LineBotApp {
     this.setupRoutes();
     this.startScheduler();
   }
+}  // 👈 這一個大括號很重要！收掉 class
 
 // 環境變數驗證
 function validateEnvironment() {
