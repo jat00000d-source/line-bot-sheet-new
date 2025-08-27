@@ -1419,7 +1419,7 @@ class LineBotApp {
           text: '處理您的訊息時發生錯誤，請稍後再試。'
         };
         
-        try {
+try {
           await this.client.replyMessage(event.replyToken, errorMessage);
           console.log('✅ 錯誤訊息已發送');
         } catch (replyError) {
@@ -1431,7 +1431,8 @@ class LineBotApp {
     }
   }
 
- getHelpMessage(language) {
+  // ← 添加這個方法定義符號
+  getHelpMessage(language) {
     const helpText = language === 'ja' ? 
       `🤖 LINE記帳ボット使い方\n\n` +
       `💰 記帳:\n` +
@@ -1469,5 +1470,10 @@ class LineBotApp {
       `🧪 測試:\n` +
       `・「test」- 連接確認`;
 
-    return helpText; // ← 添加這一行
-} // ← 添加這個結尾大括號
+    return helpText;
+  }
+} // ← 確保這是類別的結尾大括號
+
+// 如果有其他程式碼（如模組導出），請加在這裡
+// 例如：
+// module.exports = YourClassName;
