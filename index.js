@@ -837,27 +837,28 @@ class GoogleSheetsReminderController {
           text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
         };
       } else {
-        return {
-          type: 'text',
-          text: language === 'ja' ? '指定されたリマインダーが見つかりません。' : '找不到指定的提醒。'
-        };
-      }
-      
-    } catch (error) {
-      console.error('刪除提醒錯誤:', error);
-return {
-        type: 'text',
-        text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
-      };
-    } else {
-      return {
-        type: 'text',
-        text: language === 'ja' ? '指定されたリマインダーが見つかりません。' : '找不到指定的提醒。'
-      };
-    }
-    
-  } catch (error) {
-    console.error('刪除提醒錯誤:', error);
+        try {
+  const deleted = await deleteReminder(id); // 這裡是你實際刪除提醒的函式
+
+  if (deleted) {
+    return {
+      type: 'text',
+      text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
+    };
+  } else {
+    return {
+      type: 'text',
+      text: language === 'ja' ? '指定されたリマインダーが見つかりません。' : '找不到指定的提醒。'
+    };
+  }
+} catch (error) {
+  console.error('刪除提醒錯誤:', error);
+  return {
+    type: 'text',
+    text: language === 'ja' ? '削除中にエラーが発生しました。' : '刪除提醒時發生錯誤。'
+  };
+}
+
     return {
       type: 'text',
       text: language === 'ja' ? `リマインダー削除時にエラーが発生しました: ${error.message}` : `刪除提醒時發生錯誤: ${error.message}`
