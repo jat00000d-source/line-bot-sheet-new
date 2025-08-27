@@ -1,3 +1,10 @@
+// 在檔案最開頭直接載入
+const line = require('@line/bot-sdk');
+const express = require('express');
+
+console.log('=== LINE Bot 啟動開始 ===');
+// ... 其他程式碼
+
 console.log('=== LINE Bot 啟動開始 ===');
 console.log('Node.js 版本:', process.version);
 console.log('當前時間:', new Date().toISOString());
