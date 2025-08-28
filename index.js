@@ -705,8 +705,8 @@ const timePatterns = [
   }
 ];
 
-// 將 calculateNextExecution 移出陣列，作為獨立函數
-function calculateNextExecution(datetime, recurring) {
+// 將 calculateNextExecution 定義為類別方法
+calculateNextExecution(datetime, recurring) {
   if (!recurring || recurring === '單次') {
     return datetime;
   }
@@ -733,6 +733,31 @@ function calculateNextExecution(datetime, recurring) {
     }
   }
   
+  return next;
+}
+
+async checkAndSendReminders() {
+  try {
+    const sheet = await this.getReminderSheet();
+    const rows = await sheet.getRows();
+    const now = moment().tz('Asia/Tokyo');
+    
+    const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
+    
+    for (const reminder of activeReminders) {
+      const nextExecution = moment(reminder.get('下次執行時間'));
+      
+      // 修復：更精確的時間比較，避免重複發送
+      if (now.isSame(nextExecution, 'minute') && now.isAfter(nextExecution.subtract(30, 'seconds'))) {
+        await this.sendReminder(reminder);
+        await this.updateReminderAfterExecution(reminder, now);
+      }
+    }
+    
+  } catch (error) {
+    console.error('檢查提醒錯誤:', error);
+  }
+}
   return next;
 }
 
