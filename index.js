@@ -588,7 +588,7 @@ class GoogleSheetsReminderController {
       }
     ];
 
-    // 應用重複設定解析並清理內容
+   // 應用重複設定解析並清理內容
     for (const { pattern, value } of recurringPatterns) {
       if (pattern.test(text)) {
         recurring = value;
@@ -598,8 +598,7 @@ class GoogleSheetsReminderController {
       }
     }
 
-  // 修復問題2：改進時間解析，避免延遲問題
-// 修復問題2：改進時間解析，避免延遲問題
+    // 修復問題2：改進時間解析，避免延遲問題
     const timePatterns = [
       // === 新增的時間格式模式 ===
       
@@ -782,57 +781,6 @@ class GoogleSheetsReminderController {
       console.error('檢查提醒錯誤:', error);
     }
   }
-
-async checkAndSendReminders() {
-  try {
-    const sheet = await this.getReminderSheet();
-    const rows = await sheet.getRows();
-    const now = moment().tz('Asia/Tokyo');
-    
-    const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
-    
-    for (const reminder of activeReminders) {
-      const nextExecution = moment(reminder.get('下次執行時間'));
-      
-      // 修復：更精確的時間比較，避免重複發送
-      if (now.isSame(nextExecution, 'minute') && now.isAfter(nextExecution.subtract(30, 'seconds'))) {
-        await this.sendReminder(reminder);
-        await this.updateReminderAfterExecution(reminder, now);
-      }
-    }
-    
-  } catch (error) {
-    console.error('檢查提醒錯誤:', error);
-  }
-}
-
-async checkAndSendReminders() {
-  try {
-    const sheet = await this.getReminderSheet();
-    const rows = await sheet.getRows();
-    const now = moment().tz('Asia/Tokyo');
-    
-    const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
-    
-    for (const reminder of activeReminders) {
-      const nextExecution = moment(reminder.get('下次執行時間'));
-      
-      // 修復：更精確的時間比較，避免重複發送
-      if (now.isSame(nextExecution, 'minute') && now.isAfter(nextExecution.subtract(30, 'seconds'))) {
-        await this.sendReminder(reminder);
-        await this.updateReminderAfterExecution(reminder, now);
-      }
-    }
-    
-  } catch (error) {
-    console.error('檢查提醒錯誤:', error);
-  }
-}
-    
-  } catch (error) {
-    console.error('檢查提醒錯誤:', error);
-  }
-}
 
   async sendReminder(reminder) {
     try {
