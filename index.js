@@ -736,31 +736,28 @@ function calculateNextExecution(datetime, recurring) {
   return next;
 }
 
-    return next;
-  }
-
-  async checkAndSendReminders() {
-    try {
-      const sheet = await this.getReminderSheet();
-      const rows = await sheet.getRows();
-      const now = moment().tz('Asia/Tokyo');
+async checkAndSendReminders() {
+  try {
+    const sheet = await this.getReminderSheet();
+    const rows = await sheet.getRows();
+    const now = moment().tz('Asia/Tokyo');
+    
+    const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
+    
+    for (const reminder of activeReminders) {
+      const nextExecution = moment(reminder.get('下次執行時間'));
       
-      const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
-      
-      for (const reminder of activeReminders) {
-        const nextExecution = moment(reminder.get('下次執行時間'));
-        
-        // 修復：更精確的時間比較，避免重複發送
-        if (now.isSame(nextExecution, 'minute') && now.isAfter(nextExecution.subtract(30, 'seconds'))) {
-          await this.sendReminder(reminder);
-          await this.updateReminderAfterExecution(reminder, now);
-        }
+      // 修復：更精確的時間比較，避免重複發送
+      if (now.isSame(nextExecution, 'minute') && now.isAfter(nextExecution.subtract(30, 'seconds'))) {
+        await this.sendReminder(reminder);
+        await this.updateReminderAfterExecution(reminder, now);
       }
-      
-    } catch (error) {
-      console.error('檢查提醒錯誤:', error);
     }
+    
+  } catch (error) {
+    console.error('檢查提醒錯誤:', error);
   }
+}
 
   async sendReminder(reminder) {
     try {
