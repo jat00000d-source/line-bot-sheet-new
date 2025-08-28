@@ -599,7 +599,18 @@ class GoogleSheetsReminderController {
     }
 
   // 修復問題2：改進時間解析，避免延遲問題
-const timePatterns = [
+// 應用重複設定解析並清理內容
+    for (const { pattern, value } of recurringPatterns) {
+      if (pattern.test(text)) {
+        recurring = value;
+        // 完全移除重複關鍵詞
+        content = content.replace(pattern, '').trim();
+        break;
+      }
+    }
+
+    // 修復問題2：改進時間解析，避免延遲問題
+    const timePatterns = [
   // === 新增的時間格式模式 ===
   
   // 中文完整格式：10點10分、12點30分
@@ -703,10 +714,10 @@ const timePatterns = [
       content = content.replace(match[0], '').trim();
     }
   }
-];
+    ];
 
-// 將 calculateNextExecution 定義為類別方法
-calculateNextExecution(datetime, recurring) {
+    // 這些應該是類別內的方法
+    calculateNextExecution(datetime, recurring) {
   if (!recurring || recurring === '單次') {
     return datetime;
   }
@@ -731,9 +742,34 @@ calculateNextExecution(datetime, recurring) {
       default:
         break;
     }
+    // 修正縮排，移除註解選項
+    
   }
   
   return next;
+}
+
+async checkAndSendReminders() {
+  try {
+    const sheet = await this.getReminderSheet();
+    const rows = await sheet.getRows();
+    const now = moment().tz('Asia/Tokyo');
+    
+    const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
+    
+    for (const reminder of activeReminders) {
+      const nextExecution = moment(reminder.get('下次執行時間'));
+      
+      // 修復：更精確的時間比較，避免重複發送
+      if (now.isSame(nextExecution, 'minute') && now.isAfter(nextExecution.subtract(30, 'seconds'))) {
+        await this.sendReminder(reminder);
+        await this.updateReminderAfterExecution(reminder, now);
+      }
+    }
+    
+  } catch (error) {
+    console.error('檢查提醒錯誤:', error);
+  }
 }
 
 async checkAndSendReminders() {
