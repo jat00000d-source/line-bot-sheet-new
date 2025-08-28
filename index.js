@@ -600,61 +600,6 @@ class GoogleSheetsReminderController {
 
     // 修復問題2：改進時間解析，避免延遲問題
     const timePatterns = [
-      // 在 parseReminderCommand 方法中的 timePatterns 陣列裡新增這些模式：
-
-  
-  // 中文完整格式：10點10分、12點30分
-  {
-    pattern: /(\d{1,2})\s*[點点时]\s*(\d{1,2})\s*分/,
-    handler: (match) => {
-      const hour = parseInt(match[1]);
-      const minute = parseInt(match[2]);
-      datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
-      if (datetime.isBefore(now)) datetime.add(1, 'day');
-      content = content.replace(match[0], '').trim();
-    }
-  },
-  
-  // 純數字冒號格式：10:10、15:30
-  {
-    pattern: /(\d{1,2})[:：](\d{2})/,
-    handler: (match) => {
-      const hour = parseInt(match[1]);
-      const minute = parseInt(match[2]);
-      datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
-      if (datetime.isBefore(now)) datetime.add(1, 'day');
-      content = content.replace(match[0], '').trim();
-    }
-  },
-  
-  // 日文格式：10時10分
-  {
-    pattern: /(\d{1,2})\s*時\s*(\d{1,2})\s*分/,
-    handler: (match) => {
-      const hour = parseInt(match[1]);
-      const minute = parseInt(match[2]);
-      datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
-      if (datetime.isBefore(now)) datetime.add(1, 'day');
-      content = content.replace(match[0], '').trim();
-    }
-  },
-
-  // === 原有的模式保持不變 ===
-  
-  // 絕對時間 - 今天/明天 + 時間（精確匹配）
-  {
-    pattern: /(今天|今日)\s*(\d{1,2})[:：時点](\d{2})/,
-    handler: (match) => {
-      const hour = parseInt(match[2]);
-      const minute = parseInt(match[3]);
-      datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
-      if (datetime.isBefore(now)) datetime.add(1, 'day');
-      content = content.replace(match[0], '').trim();
-    }
-  },
-  
-  // ... 其他現有模式保持不變
-];
       // 絕對時間 - 今天/明天 + 時間（精確匹配）
       {
         pattern: /(今天|今日)\s*(\d{1,2})[:：時点](\d{2})/,
