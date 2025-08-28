@@ -598,8 +598,8 @@ class GoogleSheetsReminderController {
       }
     }
 
-    // 修復問題2：改進時間解析，避免延遲問題
-    const timePatterns = [
+  // 修復問題2：改進時間解析，避免延遲問題
+const timePatterns = [
   // === 新增的時間格式模式 ===
   
   // 中文完整格式：10點10分、12點30分
@@ -637,7 +637,6 @@ class GoogleSheetsReminderController {
       content = content.replace(match[0], '').trim();
     }
   },
-
   // === 原有的模式 ===
   
   // 絕對時間 - 今天/明天 + 時間（精確匹配）
@@ -706,33 +705,36 @@ class GoogleSheetsReminderController {
   }
 ];
 
-  calculateNextExecution(datetime, recurring) {
-    if (!recurring || recurring === '單次') {
-      return datetime;
+// 將 calculateNextExecution 移出陣列，作為獨立函數
+function calculateNextExecution(datetime, recurring) {
+  if (!recurring || recurring === '單次') {
+    return datetime;
+  }
+  const now = moment().tz('Asia/Tokyo');
+  let next = datetime.clone();
+  
+  // 如果時間已經過了，計算下一次執行時間
+  while (next.isBefore(now)) {
+    switch (recurring) {
+      case '每天':
+        next.add(1, 'day');
+        break;
+      case '每週':
+        next.add(1, 'week');
+        break;
+      case '每月':
+        next.add(1, 'month');
+        break;
+      case '每年':
+        next.add(1, 'year');
+        break;
+      default:
+        break;
     }
-
-    const now = moment().tz('Asia/Tokyo');
-    let next = datetime.clone();
-
-    // 如果時間已經過了，計算下一次執行時間
-    while (next.isBefore(now)) {
-      switch (recurring) {
-        case '每天':
-          next.add(1, 'day');
-          break;
-        case '每週':
-          next.add(1, 'week');
-          break;
-        case '每月':
-          next.add(1, 'month');
-          break;
-        case '每年':
-          next.add(1, 'year');
-          break;
-        default:
-          break;
-      }
-    }
+  }
+  
+  return next;
+}
 
     return next;
   }
