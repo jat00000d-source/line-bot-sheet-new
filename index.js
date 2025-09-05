@@ -692,36 +692,44 @@ async handleTodo(event, command, language) {
     };
   } // 結束當前方法
 
-  // 作為類別的獨立方法
-  calculateNextExecution(datetime, recurring) {
-    if (!recurring || recurring === '單次') {
-      return datetime;
-    }
-    const now = moment().tz('Asia/Tokyo');
-    let next = datetime.clone();
-    
-    // 如果時間已經過了，計算下一次執行時間
-    while (next.isBefore(now)) {
-      switch (recurring) {
-        case '每天':
-          next.add(1, 'day');
-          break;
-        case '每週':
-          next.add(1, 'week');
-          break;
-        case '每月':
-          next.add(1, 'month');
-          break;
-        case '每年':
-          next.add(1, 'year');
-          break;
-        default:
-          break;
-      }
-    }
-    
-    return next;
+// 修正的 calculateNextExecution 方法
+calculateNextExecution(datetime, recurring) {
+  if (!recurring || recurring === '單次') {
+    return datetime;
   }
+
+  const now = moment().tz('Asia/Tokyo');
+  let next = datetime.clone();
+
+  console.log('計算下次執行時間:', {
+    current: datetime.format('YYYY-MM-DD HH:mm'),
+    recurring,
+    now: now.format('YYYY-MM-DD HH:mm')
+  });
+
+  // 如果時間已經過了，計算下一次執行時間
+  while (next.isSameOrBefore(now)) {
+    switch (recurring) {
+      case '每天':
+        next.add(1, 'day');
+        break;
+      case '每週':
+        next.add(1, 'week');
+        break;
+      case '每月':
+        next.add(1, 'month');
+        break;
+      case '每年':
+        next.add(1, 'year');
+        break;
+      default:
+        break;
+    }
+  }
+
+  console.log('計算出的下次執行時間:', next.format('YYYY-MM-DD HH:mm'));
+  return next;
+}
 
   async checkAndSendReminders() {
     try {
