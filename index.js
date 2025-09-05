@@ -487,7 +487,6 @@ async handleTodo(event, command, language) {
     };
   }
 }
-  }
 
   async handleDeleteReminder(event, command, language) {
     try {
