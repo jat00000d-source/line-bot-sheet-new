@@ -526,276 +526,195 @@ async handleTodo(event, command, language) {
     }
   }
 
-  parseReminderCommand(text) {
-    const now = moment().tz('Asia/Tokyo');
-    let content = text;
-    let datetime = now.clone().add(1, 'hour'); // 預設1小時後
-    let recurring = null;
+/ 修正後的 parseReminderCommand 方法
+parseReminderCommand(text) {
+  const now = moment().tz('Asia/Tokyo');
+  let content = text.trim();
+  let datetime = null;
+  let recurring = null;
 
-    // 修復問題1：先解析重複設定，並完全移除匹配的文字
-    const recurringPatterns = [
-      {
-        pattern: /(每天|毎日|daily)/gi,
-        value: '每天'
-      },
-      {
-        pattern: /(每週|毎週|週次|weekly)/gi,
-        value: '每週'
-      },
-      {
-        pattern: /(每月|毎月|monthly)/gi,
-        value: '每月'
-      },
-      {
-        pattern: /(每年|毎年|yearly)/gi,
-        value: '每年'
-      }
-    ];
+  console.log('開始解析提醒:', content);
 
-   // 應用重複設定解析並清理內容
-    for (const { pattern, value } of recurringPatterns) {
-      if (pattern.test(text)) {
-        recurring = value;
-        // 完全移除重複關鍵詞
-        content = content.replace(pattern, '').trim();
-        break;
-      }
+  // 第一步：解析重複設定並從內容中移除
+  const recurringPatterns = [
+    { pattern: /每天|毎日|daily/gi, value: '每天' },
+    { pattern: /每週|毎週|每周|weekly/gi, value: '每週' },
+    { pattern: /每月|毎月|monthly/gi, value: '每月' },
+    { pattern: /每年|毎年|yearly/gi, value: '每年' }
+  ];
+
+  for (const { pattern, value } of recurringPatterns) {
+    if (pattern.test(content)) {
+      recurring = value;
+      content = content.replace(pattern, ' ').replace(/\s+/g, ' ').trim();
+      console.log('找到重複設定:', value, '剩餘內容:', content);
+      break;
     }
-
-    // 修復問題2：改進時間解析，避免延遲問題
-    const timePatterns = [
-      // === 新增的時間格式模式 ===
-      
-      // 中文完整格式：10點10分、12點30分
-      {
-        pattern: /(\d{1,2})\s*[點点时]\s*(\d{1,2})\s*分/,
-        handler: (match) => {
-          const hour = parseInt(match[1]);
-          const minute = parseInt(match[2]);
-          datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
-          if (datetime.isBefore(now)) datetime.add(1, 'day');
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      
-      // 純數字冒號格式：10:10、15:30
-      {
-        pattern: /(\d{1,2})[:：](\d{2})/,
-        handler: (match) => {
-          const hour = parseInt(match[1]);
-          const minute = parseInt(match[2]);
-          datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
-          if (datetime.isBefore(now)) datetime.add(1, 'day');
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      
-      // 日文格式：10時10分
-      {
-        pattern: /(\d{1,2})\s*時\s*(\d{1,2})\s*分/,
-        handler: (match) => {
-          const hour = parseInt(match[1]);
-          const minute = parseInt(match[2]);
-          datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
-          if (datetime.isBefore(now)) datetime.add(1, 'day');
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      
-      // 絕對時間 - 今天/明天 + 時間（精確匹配）
-      {
-        pattern: /(今天|今日)\s*(\d{1,2})[:：時点](\d{2})/,
-        handler: (match) => {
-          const hour = parseInt(match[2]);
-          const minute = parseInt(match[3]);
-          datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
-          if (datetime.isBefore(now)) datetime.add(1, 'day');
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      {
-        pattern: /(今天|今日)\s*(\d{1,2})[:：時点]?$/,
-        handler: (match) => {
-          const hour = parseInt(match[2]);
-          datetime = now.clone().hour(hour).minute(0).second(0).millisecond(0);
-          if (datetime.isBefore(now)) datetime.add(1, 'day');
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      {
-        pattern: /(明天|明日)\s*(\d{1,2})[:：時点](\d{2})/,
-        handler: (match) => {
-          const hour = parseInt(match[2]);
-          const minute = parseInt(match[3]);
-          datetime = now.clone().add(1, 'day').hour(hour).minute(minute).second(0).millisecond(0);
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      {
-        pattern: /(明天|明日)\s*(\d{1,2})[:：時点]?$/,
-        handler: (match) => {
-          const hour = parseInt(match[2]);
-          datetime = now.clone().add(1, 'day').hour(hour).minute(0).second(0).millisecond(0);
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      
-      // 相對時間
-      {
-        pattern: /(\d+)\s*(分鐘?|分|minutes?)\s*後/,
-        handler: (match) => {
-          const minutes = parseInt(match[1]);
-          datetime = now.clone().add(minutes, 'minutes').second(0).millisecond(0);
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      {
-        pattern: /(\d+)\s*(小時?|時間|hours?)\s*後/,
-        handler: (match) => {
-          const hours = parseInt(match[1]);
-          datetime = now.clone().add(hours, 'hours').second(0).millisecond(0);
-          content = content.replace(match[0], '').trim();
-        }
-      },
-      
-      // 只有數字的時間（如"9點"）
-      {
-        pattern: /(\d{1,2})\s*[點时]/,
-        handler: (match) => {
-          const hour = parseInt(match[1]);
-          datetime = now.clone().hour(hour).minute(0).second(0).millisecond(0);
-          if (datetime.isBefore(now)) datetime.add(1, 'day');
-          content = content.replace(match[0], '').trim();
-        }
-      }
-    ];
-
-    // 應用時間模式處理
-    for (const timePattern of timePatterns) {
-      const match = content.match(timePattern.pattern);
-      if (match) {
-        timePattern.handler(match);
-        break;
-      }
-    }
-
-    // 如果解析出了時間和重複設定，計算下次執行時間
-    if (datetime) {
-      datetime = this.calculateNextExecution(datetime, recurring);
-    }
-
-    // 返回解析結果
-    return {
-      datetime,
-      recurring,
-      content: content.trim()
-    };
-  } // 結束當前方法
-
-// 修正的 calculateNextExecution 方法
-calculateNextExecution(datetime, recurring) {
-  if (!recurring || recurring === '單次') {
-    return datetime;
   }
 
-  const now = moment().tz('Asia/Tokyo');
-  let next = datetime.clone();
+  // 第二步：解析時間並從內容中移除
+  const timePatterns = [
+    // 特定日期 + 時間組合
+    {
+      pattern: /(今天|今日)\s*(\d{1,2})[:：時点](\d{2})/,
+      handler: (match) => {
+        const hour = parseInt(match[2]);
+        const minute = parseInt(match[3]);
+        datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
+        if (datetime.isBefore(now)) datetime.add(1, 'day');
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析今天時間:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    {
+      pattern: /(今天|今日)\s*(\d{1,2})[點时]?$/,
+      handler: (match) => {
+        const hour = parseInt(match[2]);
+        datetime = now.clone().hour(hour).minute(0).second(0).millisecond(0);
+        if (datetime.isBefore(now)) datetime.add(1, 'day');
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析今天整點:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    {
+      pattern: /(明天|明日)\s*(\d{1,2})[:：時点](\d{2})/,
+      handler: (match) => {
+        const hour = parseInt(match[2]);
+        const minute = parseInt(match[3]);
+        datetime = now.clone().add(1, 'day').hour(hour).minute(minute).second(0).millisecond(0);
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析明天時間:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    {
+      pattern: /(明天|明日)\s*(\d{1,2})[點时]?$/,
+      handler: (match) => {
+        const hour = parseInt(match[2]);
+        datetime = now.clone().add(1, 'day').hour(hour).minute(0).second(0).millisecond(0);
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析明天整點:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    
+    // 純時間格式
+    {
+      pattern: /(\d{1,2})[:：](\d{2})/,
+      handler: (match) => {
+        const hour = parseInt(match[1]);
+        const minute = parseInt(match[2]);
+        datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
+        if (datetime.isBefore(now)) datetime.add(1, 'day');
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析時間格式:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    {
+      pattern: /(\d{1,2})[點时](\d{1,2})分/,
+      handler: (match) => {
+        const hour = parseInt(match[1]);
+        const minute = parseInt(match[2]);
+        datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
+        if (datetime.isBefore(now)) datetime.add(1, 'day');
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析中文時間:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    {
+      pattern: /(\d{1,2})\s*時\s*(\d{1,2})\s*分/,
+      handler: (match) => {
+        const hour = parseInt(match[1]);
+        const minute = parseInt(match[2]);
+        datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
+        if (datetime.isBefore(now)) datetime.add(1, 'day');
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析日文時間:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    {
+      pattern: /(\d{1,2})[點时]/,
+      handler: (match) => {
+        const hour = parseInt(match[1]);
+        datetime = now.clone().hour(hour).minute(0).second(0).millisecond(0);
+        if (datetime.isBefore(now)) datetime.add(1, 'day');
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析整點時間:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    
+    // 相對時間
+    {
+      pattern: /(\d+)\s*分[鐘钟]?\s*[后後]/,
+      handler: (match) => {
+        const minutes = parseInt(match[1]);
+        datetime = now.clone().add(minutes, 'minutes').second(0).millisecond(0);
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析分鐘後:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    {
+      pattern: /(\d+)\s*[小時时]\s*[后後]/,
+      handler: (match) => {
+        const hours = parseInt(match[1]);
+        datetime = now.clone().add(hours, 'hours').second(0).millisecond(0);
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析小時後:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    },
+    
+    // 月份日期設定 (修正每月20號的問題)
+    {
+      pattern: /每月(\d{1,2})[號号日]/,
+      handler: (match) => {
+        const day = parseInt(match[1]);
+        const targetMonth = now.clone().date(day).hour(9).minute(0).second(0).millisecond(0);
+        
+        // 如果這個月的指定日期已經過了，設定為下個月
+        if (targetMonth.isBefore(now)) {
+          targetMonth.add(1, 'month');
+        }
+        
+        datetime = targetMonth;
+        recurring = '每月'; // 確保設定為每月重複
+        content = content.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+        console.log('解析每月日期:', datetime.format('YYYY-MM-DD HH:mm'));
+      }
+    }
+  ];
 
-  console.log('計算下次執行時間:', {
-    current: datetime.format('YYYY-MM-DD HH:mm'),
-    recurring,
-    now: now.format('YYYY-MM-DD HH:mm')
+  // 應用時間解析
+  for (const timePattern of timePatterns) {
+    const match = content.match(timePattern.pattern);
+    if (match) {
+      timePattern.handler(match);
+      break;
+    }
+  }
+
+  // 如果沒有解析出時間，設定預設時間
+  if (!datetime) {
+    if (recurring) {
+      // 有重複設定但沒有具體時間，設定預設時間（明天9點）
+      datetime = now.clone().add(1, 'day').hour(9).minute(0).second(0).millisecond(0);
+    } else {
+      // 沒有時間也沒有重複，設定1小時後
+      datetime = now.clone().add(1, 'hour').second(0).millisecond(0);
+    }
+    console.log('使用預設時間:', datetime.format('YYYY-MM-DD HH:mm'));
+  }
+
+  console.log('最終解析結果:', {
+    datetime: datetime.format('YYYY-MM-DD HH:mm'),
+    recurring: recurring || '單次',
+    content: content
   });
 
-  // 如果時間已經過了，計算下一次執行時間
-  while (next.isSameOrBefore(now)) {
-    switch (recurring) {
-      case '每天':
-        next.add(1, 'day');
-        break;
-      case '每週':
-        next.add(1, 'week');
-        break;
-      case '每月':
-        next.add(1, 'month');
-        break;
-      case '每年':
-        next.add(1, 'year');
-        break;
-      default:
-        break;
-    }
-  }
-
-  console.log('計算出的下次執行時間:', next.format('YYYY-MM-DD HH:mm'));
-  return next;
+  return {
+    datetime,
+    recurring: recurring || '單次',
+    content: content || '提醒事項'
+  };
 }
 
-  async checkAndSendReminders() {
-    try {
-      const sheet = await this.getReminderSheet();
-      const rows = await sheet.getRows();
-      const now = moment().tz('Asia/Tokyo');
-      
-      const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
-      
-      for (const reminder of activeReminders) {
-        const nextExecution = moment(reminder.get('下次執行時間'));
-        
-        // 修復：更精確的時間比較，避免重複發送
-        if (now.isSame(nextExecution, 'minute') && now.isAfter(nextExecution.subtract(30, 'seconds'))) {
-          await this.sendReminder(reminder);
-          await this.updateReminderAfterExecution(reminder, now);
-        }
-      }
-      
-    } catch (error) {
-      console.error('檢查提醒錯誤:', error);
-    }
-  }
-
-  async sendReminder(reminder) {
-    try {
-      const userId = reminder.get('UserID');
-      const content = reminder.get('提醒內容');
-      const recurring = reminder.get('重複類型');
-      
-      const message = {
-        type: 'text',
-        text: `⏰ 提醒時間到了！\n\n📝 ${content}\n\n${recurring !== '單次' ? `🔄 這是${recurring}提醒` : ''}`
-      };
-      
-      await this.lineClient.pushMessage(userId, message);
-      console.log(`✅ 已發送提醒給用戶 ${userId}: ${content}`);
-      
-    } catch (error) {
-      console.error('發送提醒錯誤:', error);
-    }
-  }
-
-  async updateReminderAfterExecution(reminder, executionTime) {
-    try {
-      const recurring = reminder.get('重複類型');
-      
-      reminder.set('最後執行時間', executionTime.format('YYYY-MM-DD HH:mm:ss'));
-      
-      if (recurring && recurring !== '單次') {
-        // 計算下次執行時間
-        const currentNext = moment(reminder.get('下次執行時間'));
-        const nextExecution = this.calculateNextExecution(currentNext, recurring);
-        reminder.set('下次執行時間', nextExecution.format('YYYY-MM-DD HH:mm:ss'));
-      } else {
-        // 單次提醒，執行後停用
-        reminder.set('狀態', '已完成');
-      }
-      
-      await reminder.save();
-      
-    } catch (error) {
-      console.error('更新提醒執行狀態錯誤:', error);
-    }
-  }
-}
 
 // 增強版命令解析器
 class EnhancedCommandParser {
