@@ -553,7 +553,7 @@ class GoogleSheetsReminderController {
             return true; // 發生錯誤時，默認發送提醒
         }
     }
-
+}
     async sendReminderMessage(userId, title, description, reminderTime) {
         const timeStr = reminderTime.format('MM月DD日 HH:mm');
         
@@ -1492,7 +1492,7 @@ process.on('unhandledRejection', (reason, promise) => {
 const app = new LineBotApp();
 app.start();
 
-module.exports = LineBotApp;').trim();
+module.exports = LineBotApp;
           }
         },
         {
