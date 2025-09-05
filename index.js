@@ -1540,3 +1540,4 @@ module.exports = LineBotApp;
             datetime = now.clone().hour(hour).minute(minute).second(0).millisecond(0);
             if (datetime.isBefore(now)) datetime.add(1, 'day');
             content = content.replace(match[0], ' ').replace(/\s+/g, '
+                                                            
