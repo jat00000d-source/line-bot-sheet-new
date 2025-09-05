@@ -553,7 +553,6 @@ class GoogleSheetsReminderController {
             return true; // 發生錯誤時，默認發送提醒
         }
     }
-}
     async sendReminderMessage(userId, title, description, reminderTime) {
         const timeStr = reminderTime.format('MM月DD日 HH:mm');
         
