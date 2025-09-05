@@ -714,7 +714,7 @@ parseReminderCommand(text) {
     content: content || '提醒事項'
   };
 }
-
+}
 
 // 增強版命令解析器
 class EnhancedCommandParser {
