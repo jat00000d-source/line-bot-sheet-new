@@ -437,6 +437,102 @@ class GoogleSheetsReminderController {
       console.error('獲取提醒工作表錯誤:', error);
       throw error;
     }
+    shouldSendReminder(now, reminderTime, lastSent, repeatType) {
+    // 如果還沒到提醒時間，不發送
+    if (now.isBefore(reminderTime)) {
+        return false;
+    }
+    
+    // 如果是一次性提醒
+    if (!repeatType || repeatType === 'none' || repeatType === '') {
+        // 檢查是否已經發送過
+        if (lastSent) {
+            return false; // 已經發送過了
+        }
+        return true; // 時間到了且沒發送過
+    }
+    
+    // 重複提醒邏輯
+    if (!lastSent) {
+        return true; // 第一次發送
+    }
+    
+    try {
+        const lastSentTime = moment.tz(lastSent, 'Asia/Tokyo');
+        if (!lastSentTime.isValid()) {
+            return true; // 無法解析上次發送時間，直接發送
+        }
+        
+        switch (repeatType.toLowerCase()) {
+            case 'daily':
+            case '每天':
+                return now.diff(lastSentTime, 'days') >= 1;
+                
+            case 'weekly':
+            case '每週':
+                return now.diff(lastSentTime, 'weeks') >= 1;
+                
+            case 'monthly':
+            case '每月':
+                return now.diff(lastSentTime, 'months') >= 1;
+                
+            case 'yearly':
+            case '每年':
+                return now.diff(lastSentTime, 'years') >= 1;
+                
+            default:
+                return false;
+        }
+    } catch (error) {
+        console.error('❌ 檢查重複提醒時發生錯誤:', error.message);
+        return true; // 發生錯誤時，默認發送提醒
+    }
+}
+
+async sendReminderMessage(userId, title, description, reminderTime) {
+    const timeStr = reminderTime.format('MM月DD日 HH:mm');
+    
+    let message = `⏰ 提醒時間到！\n\n`;
+    message += `📝 ${title}\n`;
+    message += `🕐 ${timeStr}\n`;
+    
+    if (description && description.trim()) {
+        message += `📄 ${description}\n`;
+    }
+    
+    message += `\n如要標記為完成，請回覆「完成 ${title}」`;
+    
+    // 使用 LINE API 發送訊息
+    const linebot = require('@line/bot-sdk');
+    const client = new linebot.Client({
+        channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN
+    });
+    
+    await client.pushMessage(userId, {
+        type: 'text',
+        text: message
+    });
+}
+
+async updateLastSentTime(rowIndex, currentTime) {
+    try {
+        const auth = await this.authenticate();
+        const sheets = google.sheets({ version: 'v4', auth });
+        
+        // 更新 F 欄（最後發送時間）
+        const range = `Reminders!F${rowIndex}`;
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: this.spreadsheetId,
+            range: range,
+            valueInputOption: 'RAW',
+            resource: {
+                values: [[currentTime.format('YYYY-MM-DD HH:mm:ss')]]
+            }
+        });
+    } catch (error) {
+        console.error('❌ 更新最後發送時間失敗:', error.message);
+    }
+}
   }
 
   // 修正後的 handleTodo 方法
@@ -535,57 +631,99 @@ class GoogleSheetsReminderController {
   // 新增：檢查和發送提醒方法
   async checkAndSendReminders() {
     try {
-      const sheet = await this.getReminderSheet();
-      const rows = await sheet.getRows();
-      const now = moment().tz('Asia/Tokyo');
-      
-      for (const row of rows) {
-        if (row.get('狀態') !== '啟用') continue;
+        const auth = await this.authenticate();
+        const sheets = google.sheets({ version: 'v4', auth });
         
-        const nextExecution = moment(row.get('下次執行時間')).tz('Asia/Tokyo');
+        // 讀取提醒資料
+        const range = 'Reminders!A:H';
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: this.spreadsheetId,
+            range: range,
+        });
         
-        // 檢查是否應該執行
-        if (now.isSameOrAfter(nextExecution)) {
-          const userId = row.get('UserID');
-          const content = row.get('提醒內容');
-          const recurring = row.get('重複類型');
-          
-          // 發送提醒
-          const message = {
-            type: 'text',
-            text: `⏰ 提醒時間到了！\n${content}`
-          };
-          
-          try {
-            await this.lineClient.pushMessage(userId, message);
-            console.log(`✅ 提醒已發送給用戶 ${userId}: ${content}`);
+        const rows = response.data.values;
+        if (!rows || rows.length <= 1) return; // 沒有資料或只有標題
+        
+        const now = moment().tz('Asia/Tokyo');
+        console.log(`🕐 目前時間: ${now.format('YYYY-MM-DD HH:mm:ss')}`);
+        
+        // 跳過標題行，從第二行開始處理
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || row.length < 6) continue; // 確保有足夠的欄位
             
-            // 更新最後執行時間
-            row.set('最後執行時間', now.format('YYYY-MM-DD HH:mm:ss'));
+            const [userId, title, datetime, isCompleted, repeatType, lastSent, createdAt, description] = row;
             
-            // 計算下次執行時間
-            if (recurring !== '單次') {
-              const originalTime = moment(row.get('提醒時間')).tz('Asia/Tokyo');
-              const nextTime = this.calculateNextExecution(originalTime, recurring, now);
-              row.set('下次執行時間', nextTime.format('YYYY-MM-DD HH:mm:ss'));
-            } else {
-              // 單次提醒，標記為已完成
-              row.set('狀態', '已完成');
+            // 跳過已完成的提醒
+            if (isCompleted === 'TRUE' || isCompleted === true) continue;
+            
+            // 修正日期格式解析
+            let reminderTime;
+            try {
+                // 嘗試多種日期格式
+                if (datetime.includes('T')) {
+                    // ISO 格式: 2025-10-05T09:00:00
+                    reminderTime = moment.tz(datetime, 'Asia/Tokyo');
+                } else if (datetime.includes(' ')) {
+                    // 空格分隔格式: 2025-10-05 9:00:00 或 2025-10-05 09:00:00
+                    const formats = [
+                        'YYYY-MM-DD H:mm:ss',
+                        'YYYY-MM-DD HH:mm:ss',
+                        'YYYY-MM-DD H:mm',
+                        'YYYY-MM-DD HH:mm'
+                    ];
+                    
+                    let parsed = false;
+                    for (const format of formats) {
+                        reminderTime = moment.tz(datetime, format, 'Asia/Tokyo');
+                        if (reminderTime.isValid()) {
+                            parsed = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!parsed) {
+                        console.error(`❌ 無法解析日期格式: ${datetime}`);
+                        continue;
+                    }
+                } else {
+                    // 其他格式
+                    reminderTime = moment.tz(datetime, 'Asia/Tokyo');
+                }
+                
+                if (!reminderTime.isValid()) {
+                    console.error(`❌ 日期無效: ${datetime}`);
+                    continue;
+                }
+            } catch (error) {
+                console.error(`❌ 日期解析錯誤 (${datetime}):`, error.message);
+                continue;
             }
             
-            await row.save();
+            // 檢查是否需要發送提醒
+            const shouldSend = this.shouldSendReminder(now, reminderTime, lastSent, repeatType);
             
-          } catch (sendError) {
-            console.error(`❌ 發送提醒失敗 (用戶: ${userId}):`, sendError);
-          }
+            if (shouldSend) {
+                console.log(`📢 準備發送提醒: ${title} (${datetime})`);
+                
+                try {
+                    // 發送提醒訊息
+                    await this.sendReminderMessage(userId, title, description || '', reminderTime);
+                    
+                    // 更新最後發送時間
+                    await this.updateLastSentTime(i + 1, now); // +1 因為 Google Sheets 是從 1 開始計數
+                    
+                    console.log(`✅ 提醒已發送: ${title}`);
+                } catch (error) {
+                    console.error(`❌ 發送提醒失敗 (${title}):`, error.message);
+                }
+            }
         }
-      }
-      
+        
     } catch (error) {
-      console.error('檢查提醒錯誤:', error);
+        console.error('❌ 檢查提醒時發生錯誤:', error);
     }
-  }
-
+}
   // 新增：計算下次執行時間方法
   calculateNextExecution(datetime, recurring, from = null) {
     const base = from || moment().tz('Asia/Tokyo');
@@ -1243,14 +1381,18 @@ class LineBotApp {
   startScheduler() {
     try {
       cron.schedule('* * * * *', async () => {
-        try {
-          await this.todoController.checkAndSendReminders();
-        } catch (error) {
-          console.error('❌ 排程器錯誤:', error);
-        }
-      }, {
-        timezone: 'Asia/Tokyo'
-      });
+    const jstTime = moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss');
+    console.log(`⏰ [${jstTime} J3T] 檢查提醒中...`);
+    
+    try {
+        // 修正：使用正確的控制器變數名稱
+        await reminderController.checkAndSendReminders();
+    } catch (error) {
+        console.error('❌ 排程器錯誤:', error);
+    }
+}, {
+    timezone: 'Asia/Tokyo'
+});
 
       console.log('⏰ 提醒排程器已啟動 (JST 時區)');
       
