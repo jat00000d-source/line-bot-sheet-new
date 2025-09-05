@@ -439,89 +439,54 @@ class GoogleSheetsReminderController {
     }
   }
 
-  async handleTodo(event, command, language) {
-    try {
-      const sheet = await this.getReminderSheet();
-      const now = moment().tz('Asia/Tokyo');
-      
-      // 修復：改進的提醒解析，避免重複詞語
-      const reminderData = this.parseReminderCommand(command.text || command.reminder);
-      
-      const reminderId = `R${now.format('YYMMDDHHmmss')}${Math.random().toString(36).substr(2, 3)}`;
-      
-      // 修復：使用準確的時間計算
-      const nextExecution = this.calculateNextExecution(reminderData.datetime, reminderData.recurring);
-      
-      const reminder = {
-        'ID': reminderId,
-        'UserID': event.source.userId,
-        '提醒內容': reminderData.content,
-        '提醒時間': reminderData.datetime.format('YYYY-MM-DD HH:mm'),
-        '重複類型': reminderData.recurring || '單次',
-        '狀態': '啟用',
-        '建立時間': now.format('YYYY-MM-DD HH:mm:ss'),
-        '最後執行時間': '',
-        '下次執行時間': nextExecution.format('YYYY-MM-DD HH:mm:ss')
-      };
-      
-      await sheet.addRow(reminder);
-      
-      const message = language === 'ja' ? 
-        `⏰ リマインダーを設定しました\n内容: ${reminderData.content}\n時間: ${reminderData.datetime.format('YYYY-MM-DD HH:mm')}\n繰り返し: ${reminderData.recurring || '一回のみ'}` :
-        `⏰ 已設定提醒\n內容: ${reminderData.content}\n時間: ${reminderData.datetime.format('YYYY-MM-DD HH:mm')}\n重複: ${reminderData.recurring || '單次'}`;
-      
-      return {
-        type: 'text',
-        text: message
-      };
-      
-    } catch (error) {
-      console.error('提醒處理錯誤:', error);
-      return {
-        type: 'text',
-        text: language === 'ja' ? 'リマインダー設定時にエラーが発生しました。' : '設定提醒時發生錯誤。'
-      };
-    }
+ // 改進的 handleTodo 方法
+async handleTodo(event, command, language) {
+  try {
+    const sheet = await this.getReminderSheet();
+    const now = moment().tz('Asia/Tokyo');
+    
+    console.log('處理提醒指令:', command);
+    
+    // 解析提醒內容
+    const reminderData = this.parseReminderCommand(command.text || command.reminder);
+    
+    // 生成唯一ID
+    const reminderId = `R${now.format('YYMMDDHHmmss')}${Math.random().toString(36).substr(2, 3)}`;
+    
+    // 計算下次執行時間
+    const nextExecution = this.calculateNextExecution(reminderData.datetime, reminderData.recurring);
+    
+    const reminder = {
+      'ID': reminderId,
+      'UserID': event.source.userId,
+      '提醒內容': reminderData.content,
+      '提醒時間': reminderData.datetime.format('YYYY-MM-DD HH:mm'),
+      '重複類型': reminderData.recurring,
+      '狀態': '啟用',
+      '建立時間': now.format('YYYY-MM-DD HH:mm:ss'),
+      '最後執行時間': '',
+      '下次執行時間': nextExecution.format('YYYY-MM-DD HH:mm:ss')
+    };
+    
+    await sheet.addRow(reminder);
+    
+    const message = language === 'ja' ? 
+      `⏰ リマインダーを設定しました\n内容: ${reminderData.content}\n時間: ${reminderData.datetime.format('MM/DD HH:mm')}\n繰り返し: ${reminderData.recurring}\n次回実行: ${nextExecution.format('MM/DD HH:mm')}` :
+      `⏰ 已設定提醒\n內容: ${reminderData.content}\n時間: ${reminderData.datetime.format('MM/DD HH:mm')}\n重複: ${reminderData.recurring}\n下次執行: ${nextExecution.format('MM/DD HH:mm')}`;
+    
+    return {
+      type: 'text',
+      text: message
+    };
+    
+  } catch (error) {
+    console.error('提醒處理錯誤:', error);
+    return {
+      type: 'text',
+      text: language === 'ja' ? 'リマインダー設定時にエラーが発生しました。' : '設定提醒時發生錯誤。'
+    };
   }
-
-  async handleQueryReminders(event, language) {
-    try {
-      const sheet = await this.getReminderSheet();
-      const rows = await sheet.getRows();
-      
-      const userReminders = rows.filter(row => 
-        row.get('UserID') === event.source.userId && 
-        row.get('狀態') === '啟用'
-      );
-      
-      if (userReminders.length === 0) {
-        return {
-          type: 'text',
-          text: language === 'ja' ? 'アクティブなリマインダーはありません。' : '目前沒有啟用的提醒事項。'
-        };
-      }
-      
-      const reminderList = userReminders.map((reminder, index) => {
-        const content = reminder.get('提醒內容');
-        const time = reminder.get('下次執行時間');
-        const recurring = reminder.get('重複類型');
-        return `${index + 1}. ${content}\n   ⏰ ${time}\n   🔄 ${recurring}`;
-      }).join('\n\n');
-      
-      const title = language === 'ja' ? '📋 リマインダー一覧:' : '📋 提醒列表:';
-      
-      return {
-        type: 'text',
-        text: `${title}\n\n${reminderList}`
-      };
-      
-    } catch (error) {
-      console.error('查詢提醒錯誤:', error);
-      return {
-        type: 'text',
-        text: language === 'ja' ? 'リマインダー取得時にエラーが発生しました。' : '查詢提醒時發生錯誤。'
-      };
-    }
+}
   }
 
   async handleDeleteReminder(event, command, language) {
