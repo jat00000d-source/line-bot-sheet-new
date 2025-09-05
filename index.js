@@ -526,7 +526,7 @@ async handleTodo(event, command, language) {
     }
   }
 
-/ 修正後的 parseReminderCommand 方法
+
 parseReminderCommand(text) {
   const now = moment().tz('Asia/Tokyo');
   let content = text.trim();
