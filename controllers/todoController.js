@@ -31,13 +31,13 @@ class GoogleSheetsReminderController {
           title: this.reminderSheetName,
           headerValues: [
             'ID', 'UserID', '提醒內容', '提醒時間', '重複類型', 
-            '狀態', '建立時間', '最後執行時間', '下次執行時間'
+            '重複資料', '狀態', '建立時間', '最後執行時間', '下次執行時間'
           ]
         });
 
         // 格式化標題列
-        await sheet.loadCells('A1:I1');
-        for (let i = 0; i < 9; i++) {
+        await sheet.loadCells('A1:J1');
+        for (let i = 0; i < 10; i++) {
           const cell = sheet.getCell(0, i);
           cell.textFormat = { bold: true };
           cell.backgroundColor = { red: 0.85, green: 0.92, blue: 0.83 };
@@ -58,20 +58,34 @@ class GoogleSheetsReminderController {
       const sheet = await this.getReminderSheet();
       const now = moment().tz('Asia/Tokyo');
       
-      // 解析提醒內容
-      const reminderData = this.reminderParser.parseReminderCommand(command.text || command.reminder);
+      // 解析提醒內容 - 使用更新的解析器
+      const reminderText = command.text || command.reminder;
+      console.log('🔍 原始提醒文字:', reminderText);
+      
+      const reminderData = this.reminderParser.parseReminderCommand(reminderText);
+      console.log('📋 解析結果:', {
+        content: reminderData.content,
+        datetime: reminderData.datetime.format('YYYY-MM-DD HH:mm:ss'),
+        recurring: reminderData.recurring,
+        recurringData: reminderData.recurringData
+      });
       
       const reminderId = `R${now.format('YYMMDDHHmmss')}${Math.random().toString(36).substr(2, 3)}`;
       
       // 計算下次執行時間
-      const nextExecution = this.reminderParser.calculateNextExecution(reminderData.datetime, reminderData.recurring);
+      const nextExecution = this.reminderParser.calculateNextExecution(
+        reminderData.datetime, 
+        reminderData.recurring, 
+        reminderData.recurringData
+      );
       
       const reminder = {
         'ID': reminderId,
         'UserID': event.source.userId,
-        '提醒內容': reminderData.content,
+        '提醒內容': reminderData.content || '提醒事項',
         '提醒時間': reminderData.datetime.format('YYYY-MM-DD HH:mm'),
         '重複類型': reminderData.recurring || '單次',
+        '重複資料': reminderData.recurringData ? JSON.stringify(reminderData.recurringData) : '',
         '狀態': '啟用',
         '建立時間': now.format('YYYY-MM-DD HH:mm:ss'),
         '最後執行時間': '',
@@ -81,8 +95,8 @@ class GoogleSheetsReminderController {
       await sheet.addRow(reminder);
       
       const message = language === 'ja' ? 
-        `⏰ リマインダーを設定しました\n内容: ${reminderData.content}\n時間: ${reminderData.datetime.format('YYYY-MM-DD HH:mm')}\n繰り返し: ${reminderData.recurring || '一回のみ'}` :
-        `⏰ 已設定提醒\n內容: ${reminderData.content}\n時間: ${reminderData.datetime.format('YYYY-MM-DD HH:mm')}\n重複: ${reminderData.recurring || '單次'}`;
+        `⏰ リマインダーを設定しました\n内容: ${reminderData.content || '提醒事項'}\n時間: ${reminderData.datetime.format('YYYY-MM-DD HH:mm')}\n繰り返し: ${reminderData.recurring || '一回のみ'}` :
+        `⏰ 已設定提醒\n內容: ${reminderData.content || '提醒事項'}\n時間: ${reminderData.datetime.format('YYYY-MM-DD HH:mm')}\n重複: ${reminderData.recurring || '單次'}`;
       
       return {
         type: 'text',
@@ -221,17 +235,34 @@ class GoogleSheetsReminderController {
   async updateReminderAfterExecution(reminder, executionTime) {
     try {
       const recurring = reminder.get('重複類型');
+      const recurringDataStr = reminder.get('重複資料');
+      
+      let recurringData = null;
+      if (recurringDataStr) {
+        try {
+          recurringData = JSON.parse(recurringDataStr);
+        } catch (parseError) {
+          console.warn('無法解析重複資料:', recurringDataStr);
+        }
+      }
       
       reminder.set('最後執行時間', executionTime.format('YYYY-MM-DD HH:mm:ss'));
       
       if (recurring && recurring !== '單次') {
         // 計算下次執行時間
         const currentNext = moment(reminder.get('下次執行時間'));
-        const nextExecution = this.reminderParser.calculateNextExecution(currentNext, recurring);
+        const nextExecution = this.reminderParser.calculateNextExecution(
+          currentNext, 
+          recurring, 
+          recurringData
+        );
         reminder.set('下次執行時間', nextExecution.format('YYYY-MM-DD HH:mm:ss'));
+        
+        console.log(`📅 ${recurring}提醒已更新，下次執行時間: ${nextExecution.format('YYYY-MM-DD HH:mm:ss')}`);
       } else {
         // 單次提醒，執行後停用
         reminder.set('狀態', '已完成');
+        console.log('✅ 單次提醒已完成並停用');
       }
       
       await reminder.save();
