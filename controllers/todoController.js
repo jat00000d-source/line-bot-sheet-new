@@ -111,4 +111,135 @@ class GoogleSheetsReminderController {
       if (userReminders.length === 0) {
         return {
           type: 'text',
-          text: language === 'ja' ? 'アクティブなリマインダーはありません。' : '目前沒有啟用的提醒事項。
+          text: language === 'ja' ? 'アクティブなリマインダーはありません。' : '目前沒有啟用的提醒事項。'
+        };
+      }
+      
+      const reminderList = userReminders.map((reminder, index) => {
+        const content = reminder.get('提醒內容');
+        const time = reminder.get('下次執行時間');
+        const recurring = reminder.get('重複類型');
+        return `${index + 1}. ${content}\n   ⏰ ${time}\n   🔄 ${recurring}`;
+      }).join('\n\n');
+      
+      const title = language === 'ja' ? '📋 リマインダー一覧:' : '📋 提醒列表:';
+      
+      return {
+        type: 'text',
+        text: `${title}\n\n${reminderList}`
+      };
+      
+    } catch (error) {
+      console.error('查詢提醒錯誤:', error);
+      return {
+        type: 'text',
+        text: language === 'ja' ? 'リマインダー取得時にエラーが発生しました。' : '查詢提醒時發生錯誤。'
+      };
+    }
+  }
+
+  async handleDeleteReminder(event, command, language) {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      
+      const userReminders = rows.filter(row => 
+        row.get('UserID') === event.source.userId && 
+        row.get('狀態') === '啟用'
+      );
+      
+      const index = parseInt(command.index) - 1;
+      
+      if (index >= 0 && index < userReminders.length) {
+        const reminderToDelete = userReminders[index];
+        reminderToDelete.set('狀態', '已刪除');
+        reminderToDelete.set('最後執行時間', moment().tz('Asia/Tokyo').format('YYYY-MM-DD HH:mm:ss'));
+        await reminderToDelete.save();
+        
+        return {
+          type: 'text',
+          text: language === 'ja' ? 'リマインダーを削除しました。' : '已刪除提醒。'
+        };
+      } else {
+        return {
+          type: 'text',
+          text: language === 'ja' ? '指定されたリマインダーが見つかりません。' : '找不到指定的提醒。'
+        };
+      }
+      
+    } catch (error) {
+      console.error('刪除提醒錯誤:', error);
+      return {
+        type: 'text',
+        text: language === 'ja' ? 'リマインダー削除時にエラーが発生しました。' : '刪除提醒時發生錯誤。'
+      };
+    }
+  }
+
+  async checkAndSendReminders() {
+    try {
+      const sheet = await this.getReminderSheet();
+      const rows = await sheet.getRows();
+      const now = moment().tz('Asia/Tokyo');
+      
+      const activeReminders = rows.filter(row => row.get('狀態') === '啟用');
+      
+      for (const reminder of activeReminders) {
+        const nextExecution = moment(reminder.get('下次執行時間'));
+        
+        // 更精確的時間比較，避免重複發送
+        if (now.isSame(nextExecution, 'minute') && now.isAfter(nextExecution.subtract(30, 'seconds'))) {
+          await this.sendReminder(reminder);
+          await this.updateReminderAfterExecution(reminder, now);
+        }
+      }
+      
+    } catch (error) {
+      console.error('檢查提醒錯誤:', error);
+    }
+  }
+
+  async sendReminder(reminder) {
+    try {
+      const userId = reminder.get('UserID');
+      const content = reminder.get('提醒內容');
+      const recurring = reminder.get('重複類型');
+      
+      const message = {
+        type: 'text',
+        text: `⏰ 提醒時間到了！\n\n📝 ${content}\n\n${recurring !== '單次' ? `🔄 這是${recurring}提醒` : ''}`
+      };
+      
+      await this.lineClient.pushMessage(userId, message);
+      console.log(`✅ 已發送提醒給用戶 ${userId}: ${content}`);
+      
+    } catch (error) {
+      console.error('發送提醒錯誤:', error);
+    }
+  }
+
+  async updateReminderAfterExecution(reminder, executionTime) {
+    try {
+      const recurring = reminder.get('重複類型');
+      
+      reminder.set('最後執行時間', executionTime.format('YYYY-MM-DD HH:mm:ss'));
+      
+      if (recurring && recurring !== '單次') {
+        // 計算下次執行時間
+        const currentNext = moment(reminder.get('下次執行時間'));
+        const nextExecution = this.reminderParser.calculateNextExecution(currentNext, recurring);
+        reminder.set('下次執行時間', nextExecution.format('YYYY-MM-DD HH:mm:ss'));
+      } else {
+        // 單次提醒，執行後停用
+        reminder.set('狀態', '已完成');
+      }
+      
+      await reminder.save();
+      
+    } catch (error) {
+      console.error('更新提醒執行狀態錯誤:', error);
+    }
+  }
+}
+
+module.exports = GoogleSheetsReminderController;
