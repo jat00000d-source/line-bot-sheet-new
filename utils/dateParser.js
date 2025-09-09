@@ -362,7 +362,7 @@ class DateParser {
   }
 }
 
-module.exports = DateParser;
+module.exports = DateParser; {
                 targetDate = new Date(
                   now.getFullYear() + 1,
                   month - 1,
@@ -907,4 +907,4 @@ module.exports = DateParser;
           
           targetDate.setHours(hour, minute, 0, 0);
           
-          if (targetDate <= now) {
+          if (targetDate <= now)
