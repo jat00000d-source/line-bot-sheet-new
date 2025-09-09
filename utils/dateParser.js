@@ -1,4 +1,35 @@
-// utils/dateParser.js - 完整修正版本
+case 'month_day':
+              const mdMonth = parseInt(match[1]);
+              const mdDay = parseInt(match[2]);
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                mdMonth - 1,
+                mdDay,
+                9, 0, 0, 0  // 預設上午9點
+              );
+              
+              // 檢查日期是否有效
+              if (targetDate.getDate() !== mdDay) {
+                // 如果當前月份沒有這一天，嘗試下個月
+                targetDate = new Date(
+                  now.getFullYear(),
+                  mdMonth,  // 下個月
+                  mdDay,
+                  9, 0, 0, 0
+                );
+              }
+              
+              // 如果日期已過，設定為明年同月
+              if (targetDate <= now) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  mdMonth - 1,
+                  mdDay,
+                  9, 0, 0, 0
+                );
+              }
+              break;// utils/dateParser.js - 完整修正版本
 class DateParser {
   constructor(language = 'zh') {
     this.language = language;
