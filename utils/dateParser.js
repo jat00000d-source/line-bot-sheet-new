@@ -779,4 +779,25 @@ class DateParser {
             if (period === '早上' && hour < 6) hour += 6;
           }
           
-          targetDate.setHours(hour, minute
+          targetDate.setHours(hour, minute, 0, 0);
+          
+          // 如果時間已過，設定為明天
+          if (targetDate <= now) {
+            targetDate.setDate(targetDate.getDate() + 1);
+          }
+          break;
+        }
+      }
+    }
+
+    if (matched) {
+      result.success = true;
+      result.datetime = targetDate.toISOString();
+      result.remainingText = text.replace(matchText, '').trim();
+    }
+
+    return result;
+  }
+}
+
+module.exports = DateParser;
