@@ -1,4 +1,4 @@
-// utils/dateParser.js - 保守修正版本（保留所有原有功能）
+// utils/dateParser.js - 修正版本
 class DateParser {
   constructor(language = 'zh') {
     this.language = language;
@@ -84,7 +84,7 @@ class DateParser {
       ];
 
       for (let pattern of patterns) {
-        pattern.regex.lastIndex = 0; // 重置正則表達式狀態
+        pattern.regex.lastIndex = 0;
         const match = pattern.regex.exec(text);
         if (match) {
           matched = true;
@@ -93,19 +93,18 @@ class DateParser {
           switch (pattern.unit) {
             case 'day':
               targetDate.setDate(targetDate.getDate() + pattern.offset);
-              // 解析時間
               if (match[2] && match[3]) {
                 targetDate.setHours(parseInt(match[2]), parseInt(match[3]), 0, 0);
               } else {
-                targetDate.setHours(9, 0, 0, 0); // 預設上午9點
+                targetDate.setHours(9, 0, 0, 0);
               }
               break;
             case 'month':
               targetDate.setMonth(targetDate.getMonth() + pattern.offset);
-              if (match[2]) { // 指定日期
+              if (match[2]) {
                 targetDate.setDate(parseInt(match[2]));
               }
-              if (match[4] && match[5]) { // 指定時間
+              if (match[4] && match[5]) {
                 targetDate.setHours(parseInt(match[4]), parseInt(match[5]), 0, 0);
               } else {
                 targetDate.setHours(9, 0, 0, 0);
@@ -147,7 +146,7 @@ class DateParser {
       ];
 
       for (let pattern of patterns) {
-        pattern.regex.lastIndex = 0; // 重置正則表達式狀態
+        pattern.regex.lastIndex = 0;
         const match = pattern.regex.exec(text);
         if (match) {
           matched = true;
@@ -206,7 +205,7 @@ class DateParser {
   }
 
   /**
-   * 解析絕對時間（具體日期） - 只修正關鍵bug
+   * 解析絕對時間（具體日期）- 修正版本
    */
   parseAbsoluteTime(text) {
     const result = {
@@ -221,182 +220,269 @@ class DateParser {
     let targetDate = new Date(now);
 
     if (this.language === 'ja') {
-      // 日文絕對時間模式
+      // 日文絕對時間模式 - 修正正則表達式順序和邏輯
       const patterns = [
         // 2024年12月25日 15:30
-        /(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})[時:](\d{1,2})[分:]?/g,
+        {
+          regex: /(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})[時:](\d{1,2})[分:]?/g,
+          type: 'full_date_time'
+        },
         // 12月25日 15:30
-        /(\d{1,2})月(\d{1,2})日\s*(\d{1,2})[時:](\d{1,2})[分:]?/g,
+        {
+          regex: /(\d{1,2})月(\d{1,2})日\s*(\d{1,2})[時:](\d{1,2})[分:]?/g,
+          type: 'month_day_time'
+        },
         // 25日 15:30
-        /(\d{1,2})日\s*(\d{1,2})[時:](\d{1,2})[分:]?/g
+        {
+          regex: /(\d{1,2})日\s*(\d{1,2})[時:](\d{1,2})[分:]?/g,
+          type: 'day_time'
+        },
+        // 2024年12月25日（沒有時間）
+        {
+          regex: /(\d{4})年(\d{1,2})月(\d{1,2})日/g,
+          type: 'full_date'
+        },
+        // 12月25日（沒有時間）
+        {
+          regex: /(\d{1,2})月(\d{1,2})日/g,
+          type: 'month_day'
+        }
       ];
 
       for (let pattern of patterns) {
-        pattern.lastIndex = 0; // 重置正則表達式狀態
-        const match = pattern.exec(text);
+        pattern.regex.lastIndex = 0;
+        const match = pattern.regex.exec(text);
         if (match) {
           matched = true;
           matchText = match[0];
           
-          if (match.length === 6) {
-            // 包含年份
-            targetDate = new Date(
-              parseInt(match[1]), 
-              parseInt(match[2]) - 1, 
-              parseInt(match[3]),
-              parseInt(match[4]),
-              parseInt(match[5]),
-              0, 0
-            );
-          } else if (match.length === 5) {
-            // 不包含年份，使用當年
-            targetDate = new Date(
-              now.getFullYear(),
-              parseInt(match[1]) - 1,
-              parseInt(match[2]),
-              parseInt(match[3]),
-              parseInt(match[4]),
-              0, 0
-            );
-            // 如果日期已過，則設定為明年
-            if (targetDate < now) {
-              targetDate.setFullYear(targetDate.getFullYear() + 1);
-            }
-          } else if (match.length === 4) {
-            // 僅日期和時間
-            const day = parseInt(match[1]);
-            const hour = parseInt(match[2]);
-            const minute = parseInt(match[3]);
-            
-            // 先嘗試當前月份
-            targetDate = new Date(
-              now.getFullYear(),
-              now.getMonth(),
-              day,
-              hour,
-              minute,
-              0, 0
-            );
-            
-            // 檢查該日期是否有效且未過期
-            if (targetDate.getDate() !== day || targetDate < now) {
-              // 如果日期無效或已過期，嘗試下個月
+          switch (pattern.type) {
+            case 'full_date_time':
+              targetDate = new Date(
+                parseInt(match[1]), 
+                parseInt(match[2]) - 1, 
+                parseInt(match[3]),
+                parseInt(match[4]),
+                parseInt(match[5]),
+                0, 0
+              );
+              break;
+              
+            case 'month_day_time':
               targetDate = new Date(
                 now.getFullYear(),
-                now.getMonth() + 1,
+                parseInt(match[1]) - 1,
+                parseInt(match[2]),
+                parseInt(match[3]),
+                parseInt(match[4]),
+                0, 0
+              );
+              // 如果日期已過，則設定為明年
+              if (targetDate < now) {
+                targetDate.setFullYear(targetDate.getFullYear() + 1);
+              }
+              break;
+              
+            case 'day_time':
+              const day = parseInt(match[1]);
+              const hour = parseInt(match[2]);
+              const minute = parseInt(match[3]);
+              
+              // 先嘗試當前月份
+              targetDate = new Date(
+                now.getFullYear(),
+                now.getMonth(),
                 day,
                 hour,
                 minute,
                 0, 0
               );
               
-              // 如果下個月也無效，嘗試明年同月
-              if (targetDate.getDate() !== day) {
+              // 檢查該日期是否有效且未過期
+              if (targetDate.getDate() !== day || targetDate < now) {
+                // 嘗試下個月
                 targetDate = new Date(
-                  now.getFullYear() + 1,
-                  now.getMonth(),
+                  now.getFullYear(),
+                  now.getMonth() + 1,
                   day,
                   hour,
                   minute,
                   0, 0
                 );
+                
+                // 如果下個月也無效，嘗試明年同月
+                if (targetDate.getDate() !== day) {
+                  targetDate = new Date(
+                    now.getFullYear() + 1,
+                    now.getMonth(),
+                    day,
+                    hour,
+                    minute,
+                    0, 0
+                  );
+                }
               }
-            }
+              break;
+              
+            case 'full_date':
+              targetDate = new Date(
+                parseInt(match[1]),
+                parseInt(match[2]) - 1,
+                parseInt(match[3]),
+                9, 0, 0, 0  // 預設上午9點
+              );
+              break;
+              
+            case 'month_day':
+              targetDate = new Date(
+                now.getFullYear(),
+                parseInt(match[1]) - 1,
+                parseInt(match[2]),
+                9, 0, 0, 0  // 預設上午9點
+              );
+              // 如果日期已過，則設定為明年
+              if (targetDate < now) {
+                targetDate.setFullYear(targetDate.getFullYear() + 1);
+              }
+              break;
           }
           break;
         }
       }
     } else {
-      // 中文絕對時間模式
+      // 中文絕對時間模式 - 修正版本
       const patterns = [
         // 2024年12月25日 下午3:30
-        /(\d{4})年(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+        {
+          regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+          type: 'full_date_time'
+        },
         // 12月25日 下午3:30 或 12月25號9點
-        /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+        {
+          regex: /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+          type: 'month_day_time'
+        },
         // 25日 下午3:30 或 25號 下午3:30
-        /(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g
+        {
+          regex: /(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+          type: 'day_time'
+        },
+        // 2024年12月25日（沒有時間）
+        {
+          regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]/g,
+          type: 'full_date'
+        },
+        // 12月25日（沒有時間）
+        {
+          regex: /(\d{1,2})月(\d{1,2})[日號]/g,
+          type: 'month_day'
+        }
       ];
 
       for (let pattern of patterns) {
-        pattern.lastIndex = 0; // 重置正則表達式狀態 - 關鍵修正！
-        const match = pattern.exec(text);
+        pattern.regex.lastIndex = 0;
+        const match = pattern.regex.exec(text);
         if (match) {
           matched = true;
           matchText = match[0];
           
           let hour, minute;
-          if (match.length === 7) {
-            // 包含年份
-            hour = parseInt(match[5]);
-            minute = parseInt(match[6]);
-            if (match[4] === '下午' && hour < 12) hour += 12;
-            if (match[4] === '上午' && hour === 12) hour = 0;
-            
-            targetDate = new Date(
-              parseInt(match[1]),
-              parseInt(match[2]) - 1,
-              parseInt(match[3]),
-              hour, minute, 0, 0
-            );
-          } else if (match.length === 6) {
-            // 不包含年份，包含月份 - 關鍵修正！
-            const month = parseInt(match[1]);
-            const day = parseInt(match[2]);
-            hour = parseInt(match[4]);
-            minute = parseInt(match[5]) || 0; // 提供預設值
-            
-            if (match[3] === '下午' && hour < 12) hour += 12;
-            if (match[3] === '上午' && hour === 12) hour = 0;
-            
-            // 先嘗試當年的該月份
-            targetDate = new Date(
-              now.getFullYear(),
-              month - 1, // JavaScript 月份從0開始
-              day,
-              hour, minute, 0, 0
-            );
-            
-            // 如果日期已過，設定為明年
-            if (targetDate < now) {
-              targetDate.setFullYear(targetDate.getFullYear() + 1);
-            }
-            
-          } else if (match.length === 5) {
-            // 僅日期和時間
-            const day = parseInt(match[1]);
-            hour = parseInt(match[3]);
-            minute = parseInt(match[4]) || 0;
-            if (match[2] === '下午' && hour < 12) hour += 12;
-            if (match[2] === '上午' && hour === 12) hour = 0;
-            
-            // 先嘗試當前月份
-            targetDate = new Date(
-              now.getFullYear(),
-              now.getMonth(),
-              day,
-              hour, minute, 0, 0
-            );
-            
-            // 檢查該日期是否有效且未過期
-            if (targetDate.getDate() !== day || targetDate < now) {
-              // 如果日期無效或已過期，嘗試下個月
+          
+          switch (pattern.type) {
+            case 'full_date_time':
+              hour = parseInt(match[5]);
+              minute = parseInt(match[6]);
+              if (match[4] === '下午' && hour < 12) hour += 12;
+              if (match[4] === '上午' && hour === 12) hour = 0;
+              
+              targetDate = new Date(
+                parseInt(match[1]),
+                parseInt(match[2]) - 1,
+                parseInt(match[3]),
+                hour, minute, 0, 0
+              );
+              break;
+              
+            case 'month_day_time':
+              const month = parseInt(match[1]);
+              const day = parseInt(match[2]);
+              hour = parseInt(match[4]);
+              minute = parseInt(match[5]) || 0;
+              
+              if (match[3] === '下午' && hour < 12) hour += 12;
+              if (match[3] === '上午' && hour === 12) hour = 0;
+              
               targetDate = new Date(
                 now.getFullYear(),
-                now.getMonth() + 1,
+                month - 1,
                 day,
                 hour, minute, 0, 0
               );
               
-              // 如果下個月也無效，嘗試明年同月
-              if (targetDate.getDate() !== day) {
+              // 如果日期已過，設定為明年
+              if (targetDate < now) {
+                targetDate.setFullYear(targetDate.getFullYear() + 1);
+              }
+              break;
+              
+            case 'day_time':
+              const dayOnly = parseInt(match[1]);
+              hour = parseInt(match[3]);
+              minute = parseInt(match[4]) || 0;
+              if (match[2] === '下午' && hour < 12) hour += 12;
+              if (match[2] === '上午' && hour === 12) hour = 0;
+              
+              // 先嘗試當前月份
+              targetDate = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                dayOnly,
+                hour, minute, 0, 0
+              );
+              
+              // 檢查該日期是否有效且未過期
+              if (targetDate.getDate() !== dayOnly || targetDate < now) {
+                // 嘗試下個月
                 targetDate = new Date(
-                  now.getFullYear() + 1,
-                  now.getMonth(),
-                  day,
+                  now.getFullYear(),
+                  now.getMonth() + 1,
+                  dayOnly,
                   hour, minute, 0, 0
                 );
+                
+                // 如果下個月也無效，嘗試明年同月
+                if (targetDate.getDate() !== dayOnly) {
+                  targetDate = new Date(
+                    now.getFullYear() + 1,
+                    now.getMonth(),
+                    dayOnly,
+                    hour, minute, 0, 0
+                  );
+                }
               }
-            }
+              break;
+              
+            case 'full_date':
+              targetDate = new Date(
+                parseInt(match[1]),
+                parseInt(match[2]) - 1,
+                parseInt(match[3]),
+                9, 0, 0, 0  // 預設上午9點
+              );
+              break;
+              
+            case 'month_day':
+              targetDate = new Date(
+                now.getFullYear(),
+                parseInt(match[1]) - 1,
+                parseInt(match[2]),
+                9, 0, 0, 0  // 預設上午9點
+              );
+              // 如果日期已過，設定為明年
+              if (targetDate < now) {
+                targetDate.setFullYear(targetDate.getFullYear() + 1);
+              }
+              break;
           }
           break;
         }
@@ -428,14 +514,13 @@ class DateParser {
     let targetDate = new Date(now);
 
     if (this.language === 'ja') {
-      // 15:30 或 15時30分
       const patterns = [
         /(\d{1,2})[時:](\d{1,2})[分:]?/g,
         /(午前|午後)(\d{1,2})[時:](\d{1,2})[分:]?/g
       ];
 
       for (let pattern of patterns) {
-        pattern.lastIndex = 0; // 重置狀態
+        pattern.lastIndex = 0;
         const match = pattern.exec(text);
         if (match) {
           matched = true;
@@ -443,11 +528,9 @@ class DateParser {
           
           let hour, minute;
           if (match.length === 3) {
-            // 24小時制
             hour = parseInt(match[1]);
             minute = parseInt(match[2]);
           } else if (match.length === 4) {
-            // 12小時制
             hour = parseInt(match[2]);
             minute = parseInt(match[3]);
             if (match[1] === '午後' && hour < 12) hour += 12;
@@ -464,7 +547,6 @@ class DateParser {
         }
       }
     } else {
-      // 中文時間模式
       const patterns = [
         /(\d{1,2})[點時:](\d{1,2})[分:]?/g,
         /(上午|下午)(\d{1,2})[點時:](\d{1,2})[分:]?/g,
@@ -472,7 +554,7 @@ class DateParser {
       ];
 
       for (let pattern of patterns) {
-        pattern.lastIndex = 0; // 重置狀態
+        pattern.lastIndex = 0;
         const match = pattern.exec(text);
         if (match) {
           matched = true;
@@ -480,7 +562,6 @@ class DateParser {
           
           let hour, minute;
           if (match.length === 3) {
-            // 24小時制
             hour = parseInt(match[1]);
             minute = parseInt(match[2]);
           } else if (match.length === 4) {
@@ -545,7 +626,7 @@ class DateParser {
     }
 
     for (let pattern of patterns) {
-      pattern.lastIndex = 0; // 重置狀態
+      pattern.lastIndex = 0;
       const match = pattern.exec(text);
       if (match) {
         const dayStr = match[1];
