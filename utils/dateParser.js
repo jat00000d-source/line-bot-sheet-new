@@ -205,7 +205,7 @@ class DateParser {
   }
 
   /**
-   * 解析絕對時間（具體日期）- 修正版本
+   * 解析絕對時間（具體日期）
    */
   parseAbsoluteTime(text) {
     const result = {
@@ -220,49 +220,40 @@ class DateParser {
     let targetDate = new Date(now);
 
     if (this.language === 'ja') {
-      // 日文絕對時間模式 - 修正正則表達式順序和邏輯
+      // 日文絕對時間模式
       const patterns = [
-        // 2024年12月25日 15:30
         {
           regex: /(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2})[時:](\d{1,2})[分:]?/g,
           type: 'full_date_time'
         },
-        // 12月25日 15:30 - 優先處理帶時間的
         {
           regex: /(\d{1,2})月(\d{1,2})[日號]\s*(\d{1,2})[時點:](\d{1,2})[分:]?/g,
           type: 'month_day_time'
         },
-        // 12月25日 10點（沒有分鐘）
         {
           regex: /(\d{1,2})月(\d{1,2})[日號]\s*(\d{1,2})[點時]/g,
           type: 'month_day_hour'
         },
-        // 25日 15:30 - 優先處理帶時間的
         {
           regex: /(\d{1,2})[日號]\s*(\d{1,2})[時點:](\d{1,2})[分:]?/g,
           type: 'day_time'
         },
-        // 2024年12月25日（沒有時間）
         {
           regex: /(\d{4})年(\d{1,2})月(\d{1,2})日/g,
           type: 'full_date'
         },
-        // 12月25日（沒有時間）- 放在最後確保不會誤匹配
         {
           regex: /(\d{1,2})月(\d{1,2})[日號](?!\s*\d)/g,
           type: 'month_day'
         },
-        // 支援簡單格式：9/27 9點30分、9-27 9:30
         {
           regex: /(\d{1,2})[\/\-](\d{1,2})\s*(\d{1,2})[時點:](\d{1,2})[分:]?/g,
           type: 'short_date_time'
         },
-        // 支援簡單格式：9/27 9點、9-27 10點（沒有分鐘）
         {
           regex: /(\d{1,2})[\/\-](\d{1,2})\s*(\d{1,2})[點時]/g,
           type: 'short_date_hour'
         },
-        // 支援簡單格式：9/27、9-27（沒有時間）
         {
           regex: /(\d{1,2})[\/\-](\d{1,2})(?!\s*\d)/g,
           type: 'short_date'
@@ -294,7 +285,6 @@ class DateParser {
               const hour = parseInt(match[3]);
               const minute = parseInt(match[4]);
               
-              // 創建目標日期
               targetDate = new Date(
                 now.getFullYear(),
                 month - 1,
@@ -304,12 +294,10 @@ class DateParser {
                 0, 0
               );
               
-              // 檢查日期是否有效
               if (targetDate.getDate() !== day) {
-                // 如果當前月份沒有這一天，嘗試下個月
                 targetDate = new Date(
                   now.getFullYear(),
-                  month,  // 下個月
+                  month,
                   day,
                   hour,
                   minute,
@@ -317,8 +305,64 @@ class DateParser {
                 );
               }
               
-              // 如果日期已過，設定為明年同月
               if (targetDate <= now) {
+            targetDate.setDate(targetDate.getDate() + 1);
+          }
+          break;
+        }
+      }
+    } else {
+      const patterns = [
+        /(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+        /(上午|下午)(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+        /(早上|中午|下午|晚上)(\d{1,2})[點時:](\d{1,2})[分:]?/g
+      ];
+      
+      for (let pattern of patterns) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(text);
+        if (match) {
+          matched = true;
+          matchText = match[0];
+          
+          let hour, minute;
+          if (match.length === 3) {
+            hour = parseInt(match[1]);
+            minute = parseInt(match[2]);
+          } else if (match.length === 4) {
+            hour = parseInt(match[2]);
+            minute = parseInt(match[3]);
+            
+            const period = match[1];
+            if (period === '下午' && hour < 12) hour += 12;
+            if (period === '上午' && hour === 12) hour = 0;
+            if (period === '晚上' && hour < 12) hour += 12;
+            if (period === '中午' && hour === 12) hour = 12;
+            if (period === '早上' && hour >= 6 && hour < 12) hour = hour;
+            if (period === '早上' && hour < 6) hour += 6;
+          }
+          
+          targetDate.setHours(hour, minute, 0, 0);
+          
+          if (targetDate <= now) {
+            targetDate.setDate(targetDate.getDate() + 1);
+          }
+          break;
+        }
+      }
+    }
+
+    if (matched) {
+      result.success = true;
+      result.datetime = targetDate.toISOString();
+      result.remainingText = text.replace(matchText, '').trim();
+    }
+
+    return result;
+  }
+}
+
+module.exports = DateParser;
                 targetDate = new Date(
                   now.getFullYear() + 1,
                   month - 1,
@@ -335,26 +379,72 @@ class DateParser {
               const dayH = parseInt(match[2]);
               const hourH = parseInt(match[3]);
               
-              // 創建目標日期
               targetDate = new Date(
                 now.getFullYear(),
                 monthH - 1,
                 dayH,
                 hourH,
-                0, // 分鐘設為0
+                0,
                 0, 0
               );
               
-              // 如果日期已過或無效，設定為明年
-              if (targetDate <= now || targetDate.getDate() !== shortHourDay) {
+              if (targetDate.getDate() !== dayH) {
                 targetDate = new Date(
-                  now.getFullYear() + 1,
-                  shortHourMonth - 1,
-                  shortHourDay,
-                  hour,
+                  now.getFullYear(),
+                  monthH,
+                  dayH,
+                  hourH,
                   0,
                   0, 0
                 );
+              }
+              
+              if (targetDate <= now) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  monthH - 1,
+                  dayH,
+                  hourH,
+                  0,
+                  0, 0
+                );
+              }
+              break;
+              
+            case 'day_time':
+              const dayOnly = parseInt(match[1]);
+              const hourOnly = parseInt(match[2]);
+              const minuteOnly = parseInt(match[3]);
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                dayOnly,
+                hourOnly,
+                minuteOnly,
+                0, 0
+              );
+              
+              if (targetDate.getDate() !== dayOnly || targetDate <= now) {
+                targetDate = new Date(
+                  now.getFullYear(),
+                  now.getMonth() + 1,
+                  dayOnly,
+                  hourOnly,
+                  minuteOnly,
+                  0, 0
+                );
+                
+                if (targetDate.getDate() !== dayOnly) {
+                  targetDate = new Date(
+                    now.getFullYear() + 1,
+                    now.getMonth(),
+                    dayOnly,
+                    hourOnly,
+                    minuteOnly,
+                    0, 0
+                  );
+                }
               }
               break;
               
@@ -363,7 +453,7 @@ class DateParser {
                 parseInt(match[1]),
                 parseInt(match[2]) - 1,
                 parseInt(match[3]),
-                9, 0, 0, 0  // 預設上午9點
+                9, 0, 0, 0
               );
               break;
               
@@ -375,21 +465,18 @@ class DateParser {
                 now.getFullYear(),
                 mdMonth - 1,
                 mdDay,
-                9, 0, 0, 0  // 預設上午9點
+                9, 0, 0, 0
               );
               
-              // 檢查日期是否有效
               if (targetDate.getDate() !== mdDay) {
-                // 如果當前月份沒有這一天，嘗試下個月
                 targetDate = new Date(
                   now.getFullYear(),
-                  mdMonth,  // 下個月
+                  mdMonth,
                   mdDay,
                   9, 0, 0, 0
                 );
               }
               
-              // 如果日期已過，設定為明年同月
               if (targetDate <= now) {
                 targetDate = new Date(
                   now.getFullYear() + 1,
@@ -408,10 +495,353 @@ class DateParser {
                 now.getFullYear(),
                 sdMonth - 1,
                 sdDay,
-                9, 0, 0, 0  // 預設上午9點
+                9, 0, 0, 0
               );
               
-              // 如果日期已過或無效，設定為明年
+              if (targetDate <= now || targetDate.getDate() !== sdDay) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  sdMonth - 1,
+                  sdDay,
+                  9, 0, 0, 0
+                );
+              }
+              break;
+              
+            case 'short_date_time':
+              const shortMonth = parseInt(match[1]);
+              const shortDay = parseInt(match[2]);
+              const shortHour = parseInt(match[3]);
+              const shortMinute = parseInt(match[4]);
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                shortMonth - 1,
+                shortDay,
+                shortHour,
+                shortMinute,
+                0, 0
+              );
+              
+              if (targetDate <= now || targetDate.getDate() !== shortDay) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  shortMonth - 1,
+                  shortDay,
+                  shortHour,
+                  shortMinute,
+                  0, 0
+                );
+              }
+              break;
+
+            case 'short_date_hour':
+              const shortHourMonth = parseInt(match[1]);
+              const shortHourDay = parseInt(match[2]);
+              const shortHourHour = parseInt(match[3]);
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                shortHourMonth - 1,
+                shortHourDay,
+                shortHourHour,
+                0,
+                0, 0
+              );
+              
+              if (targetDate <= now || targetDate.getDate() !== shortHourDay) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  shortHourMonth - 1,
+                  shortHourDay,
+                  shortHourHour,
+                  0,
+                  0, 0
+                );
+              }
+              break;
+          }
+          break;
+        }
+      }
+    } else {
+      // 中文絕對時間模式
+      const patterns = [
+        {
+          regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+          type: 'full_date_time'
+        },
+        {
+          regex: /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+          type: 'month_day_time'
+        },
+        {
+          regex: /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時]/g,
+          type: 'month_day_hour'
+        },
+        {
+          regex: /(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+          type: 'day_time'
+        },
+        {
+          regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]/g,
+          type: 'full_date'
+        },
+        {
+          regex: /(\d{1,2})月(\d{1,2})[日號](?!\s*\d)/g,
+          type: 'month_day'
+        },
+        {
+          regex: /(\d{1,2})[\/\-](\d{1,2})\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
+          type: 'short_date_time'
+        },
+        {
+          regex: /(\d{1,2})[\/\-](\d{1,2})\s*(上午|下午)?(\d{1,2})[點時]/g,
+          type: 'short_date_hour'
+        },
+        {
+          regex: /(\d{1,2})[\/\-](\d{1,2})(?!\s*\d)/g,
+          type: 'short_date'
+        }
+      ];
+
+      for (let pattern of patterns) {
+        pattern.regex.lastIndex = 0;
+        const match = pattern.regex.exec(text);
+        if (match) {
+          matched = true;
+          matchText = match[0];
+          
+          let hour, minute;
+          
+          switch (pattern.type) {
+            case 'full_date_time':
+              hour = parseInt(match[5]);
+              minute = parseInt(match[6]);
+              if (match[4] === '下午' && hour < 12) hour += 12;
+              if (match[4] === '上午' && hour === 12) hour = 0;
+              
+              targetDate = new Date(
+                parseInt(match[1]),
+                parseInt(match[2]) - 1,
+                parseInt(match[3]),
+                hour, minute, 0, 0
+              );
+              break;
+              
+            case 'month_day_time':
+              const month = parseInt(match[1]);
+              const day = parseInt(match[2]);
+              hour = parseInt(match[4]);
+              minute = parseInt(match[5]) || 0;
+              
+              if (match[3] === '下午' && hour < 12) hour += 12;
+              if (match[3] === '上午' && hour === 12) hour = 0;
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                month - 1,
+                day,
+                hour, minute, 0, 0
+              );
+              
+              if (targetDate.getDate() !== day) {
+                targetDate = new Date(
+                  now.getFullYear(),
+                  month,
+                  day,
+                  hour, minute, 0, 0
+                );
+              }
+              
+              if (targetDate <= now) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  month - 1,
+                  day,
+                  hour, minute, 0, 0
+                );
+              }
+              break;
+
+            case 'month_day_hour':
+              const monthH = parseInt(match[1]);
+              const dayH = parseInt(match[2]);
+              hour = parseInt(match[4]);
+              
+              if (match[3] === '下午' && hour < 12) hour += 12;
+              if (match[3] === '上午' && hour === 12) hour = 0;
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                monthH - 1,
+                dayH,
+                hour,
+                0,
+                0, 0
+              );
+              
+              if (targetDate.getDate() !== dayH) {
+                targetDate = new Date(
+                  now.getFullYear(),
+                  monthH,
+                  dayH,
+                  hour,
+                  0,
+                  0, 0
+                );
+              }
+              
+              if (targetDate <= now) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  monthH - 1,
+                  dayH,
+                  hour,
+                  0,
+                  0, 0
+                );
+              }
+              break;
+              
+            case 'day_time':
+              const dayOnly = parseInt(match[1]);
+              hour = parseInt(match[3]);
+              minute = parseInt(match[4]) || 0;
+              if (match[2] === '下午' && hour < 12) hour += 12;
+              if (match[2] === '上午' && hour === 12) hour = 0;
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                dayOnly,
+                hour, minute, 0, 0
+              );
+              
+              if (targetDate.getDate() !== dayOnly || targetDate <= now) {
+                targetDate = new Date(
+                  now.getFullYear(),
+                  now.getMonth() + 1,
+                  dayOnly,
+                  hour, minute, 0, 0
+                );
+                
+                if (targetDate.getDate() !== dayOnly) {
+                  targetDate = new Date(
+                    now.getFullYear() + 1,
+                    now.getMonth(),
+                    dayOnly,
+                    hour, minute, 0, 0
+                  );
+                }
+              }
+              break;
+              
+            case 'short_date_time':
+              const shortMonth = parseInt(match[1]);
+              const shortDay = parseInt(match[2]);
+              hour = parseInt(match[4]);
+              minute = parseInt(match[5]) || 0;
+              
+              if (match[3] === '下午' && hour < 12) hour += 12;
+              if (match[3] === '上午' && hour === 12) hour = 0;
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                shortMonth - 1,
+                shortDay,
+                hour, minute, 0, 0
+              );
+              
+              if (targetDate <= now || targetDate.getDate() !== shortDay) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  shortMonth - 1,
+                  shortDay,
+                  hour, minute, 0, 0
+                );
+              }
+              break;
+
+            case 'short_date_hour':
+              const shortHourMonth = parseInt(match[1]);
+              const shortHourDay = parseInt(match[2]);
+              hour = parseInt(match[4]);
+              
+              if (match[3] === '下午' && hour < 12) hour += 12;
+              if (match[3] === '上午' && hour === 12) hour = 0;
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                shortHourMonth - 1,
+                shortHourDay,
+                hour,
+                0,
+                0, 0
+              );
+              
+              if (targetDate <= now || targetDate.getDate() !== shortHourDay) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  shortHourMonth - 1,
+                  shortHourDay,
+                  hour,
+                  0,
+                  0, 0
+                );
+              }
+              break;
+              
+            case 'full_date':
+              targetDate = new Date(
+                parseInt(match[1]),
+                parseInt(match[2]) - 1,
+                parseInt(match[3]),
+                9, 0, 0, 0
+              );
+              break;
+              
+            case 'month_day':
+              const mdMonth = parseInt(match[1]);
+              const mdDay = parseInt(match[2]);
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                mdMonth - 1,
+                mdDay,
+                9, 0, 0, 0
+              );
+              
+              if (targetDate.getDate() !== mdDay) {
+                targetDate = new Date(
+                  now.getFullYear(),
+                  mdMonth,
+                  mdDay,
+                  9, 0, 0, 0
+                );
+              }
+              
+              if (targetDate <= now) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  mdMonth - 1,
+                  mdDay,
+                  9, 0, 0, 0
+                );
+              }
+              break;
+              
+            case 'short_date':
+              const sdMonth = parseInt(match[1]);
+              const sdDay = parseInt(match[2]);
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                sdMonth - 1,
+                sdDay,
+                9, 0, 0, 0
+              );
+              
               if (targetDate <= now || targetDate.getDate() !== sdDay) {
                 targetDate = new Date(
                   now.getFullYear() + 1,
@@ -477,490 +907,4 @@ class DateParser {
           
           targetDate.setHours(hour, minute, 0, 0);
           
-          // 如果時間已過，設定為明天
           if (targetDate <= now) {
-            targetDate.setDate(targetDate.getDate() + 1);
-          }
-          break;
-        }
-      }
-    } else {
-      const patterns = [
-        /(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-        /(上午|下午)(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-        /(早上|中午|下午|晚上)(\d{1,2})[點時:](\d{1,2})[分:]?/g
-      ];
-      
-      for (let pattern of patterns) {
-        pattern.lastIndex = 0;
-        const match = pattern.exec(text);
-        if (match) {
-          matched = true;
-          matchText = match[0];
-          
-          let hour, minute;
-          if (match.length === 3) {
-            hour = parseInt(match[1]);
-            minute = parseInt(match[2]);
-          } else if (match.length === 4) {
-            hour = parseInt(match[2]);
-            minute = parseInt(match[3]);
-            
-            const period = match[1];
-            if (period === '下午' && hour < 12) hour += 12;
-            if (period === '上午' && hour === 12) hour = 0;
-            if (period === '晚上' && hour < 12) hour += 12;
-            if (period === '中午' && hour === 12) hour = 12;
-            if (period === '早上' && hour >= 6 && hour < 12) hour = hour;
-            if (period === '早上' && hour < 6) hour += 6;
-          }
-          
-          targetDate.setHours(hour, minute, 0, 0);
-          
-          // 如果時間已過，設定為明天
-          if (targetDate <= now) {
-            targetDate.setDate(targetDate.getDate() + 1);
-          }
-          break;
-        }
-      }
-    }
-
-    if (matched) {
-      result.success = true;
-      result.datetime = targetDate.toISOString();
-      result.remainingText = text.replace(matchText, '').trim();
-    }
-
-    return result;
-  }
-}
-
-module.exports = DateParser;
-                0, 0
-              );
-              
-              // 檢查日期是否有效
-              if (targetDate.getDate() !== dayH) {
-                // 如果當前月份沒有這一天，嘗試下個月
-                targetDate = new Date(
-                  now.getFullYear(),
-                  monthH,  // 下個月
-                  dayH,
-                  hourH,
-                  0,
-                  0, 0
-                );
-              }
-              
-              // 如果日期已過，設定為明年同月
-              if (targetDate <= now) {
-                targetDate = new Date(
-                  now.getFullYear() + 1,
-                  monthH - 1,
-                  dayH,
-                  hourH,
-                  0,
-                  0, 0
-                );
-              }
-              break;
-              
-            case 'day_time':
-              const dayOnly = parseInt(match[1]);
-              const hourOnly = parseInt(match[2]);
-              const minuteOnly = parseInt(match[3]);
-              
-              // 先嘗試當前月份
-              targetDate = new Date(
-                now.getFullYear(),
-                now.getMonth(),
-                dayOnly,
-                hourOnly,
-                minuteOnly,
-                0, 0
-              );
-              
-              // 檢查該日期是否有效且未過期
-              if (targetDate.getDate() !== dayOnly || targetDate <= now) {
-                // 嘗試下個月
-                targetDate = new Date(
-                  now.getFullYear(),
-                  now.getMonth() + 1,
-                  dayOnly,
-                  hourOnly,
-                  minuteOnly,
-                  0, 0
-                );
-                
-                // 如果下個月也無效，嘗試明年同月
-                if (targetDate.getDate() !== dayOnly) {
-                  targetDate = new Date(
-                    now.getFullYear() + 1,
-                    now.getMonth(),
-                    dayOnly,
-                    hourOnly,
-                    minuteOnly,
-                    0, 0
-                  );
-                }
-              }
-              break;
-              
-            case 'short_date_time':
-              const shortMonth = parseInt(match[1]);
-              const shortDay = parseInt(match[2]);
-              const shortHour = parseInt(match[3]);
-              const shortMinute = parseInt(match[4]);
-              
-              targetDate = new Date(
-                now.getFullYear(),
-                shortMonth - 1,
-                shortDay,
-                shortHour,
-                shortMinute,
-                0, 0
-              );
-              
-              // 如果日期已過或無效，設定為明年
-              if (targetDate <= now || targetDate.getDate() !== shortDay) {
-                targetDate = new Date(
-                  now.getFullYear() + 1,
-                  shortMonth - 1,
-                  shortDay,
-                  shortHour,
-                  shortMinute,
-                  0, 0
-                );
-              }
-              break;
-
-            case 'short_date_hour':
-              const shortHourMonth = parseInt(match[1]);
-              const shortHourDay = parseInt(match[2]);
-              const shortHourHour = parseInt(match[3]);
-              
-              targetDate = new Date(
-                now.getFullYear(),
-                shortHourMonth - 1,
-                shortHourDay,
-                shortHourHour,
-                0, // 分鐘設為0
-                0, 0
-              );
-              
-              // 如果日期已過或無效，設定為明年
-              if (targetDate <= now || targetDate.getDate() !== shortHourDay) {
-                targetDate = new Date(
-                  now.getFullYear() + 1,
-                  shortHourMonth - 1,
-                  shortHourDay,
-                  shortHourHour,
-                  0,
-                  0, 0
-                );
-              }
-              break;
-              
-            case 'full_date':
-              targetDate = new Date(
-                parseInt(match[1]),
-                parseInt(match[2]) - 1,
-                parseInt(match[3]),
-                9, 0, 0, 0  // 預設上午9點
-              );
-              break;
-              
-            case 'month_day':
-              const mdMonth = parseInt(match[1]);
-              const mdDay = parseInt(match[2]);
-              
-              targetDate = new Date(
-                now.getFullYear(),
-                mdMonth - 1,
-                mdDay,
-                9, 0, 0, 0  // 預設上午9點
-              );
-              
-              // 檢查日期是否有效
-              if (targetDate.getDate() !== mdDay) {
-                // 如果當前月份沒有這一天，嘗試下個月
-                targetDate = new Date(
-                  now.getFullYear(),
-                  mdMonth,  // 下個月
-                  mdDay,
-                  9, 0, 0, 0
-                );
-              }
-              
-              // 如果日期已過，設定為明年同月
-              if (targetDate <= now) {
-                targetDate = new Date(
-                  now.getFullYear() + 1,
-                  mdMonth - 1,
-                  mdDay,
-                  9, 0, 0, 0
-                );
-              }
-              break;
-              
-            case 'short_date':
-              const sdMonth = parseInt(match[1]);
-              const sdDay = parseInt(match[2]);
-              
-              targetDate = new Date(
-                now.getFullYear(),
-                sdMonth - 1,
-                sdDay,
-                9, 0, 0, 0  // 預設上午9點
-              );
-              
-              // 如果日期已過或無效，設定為明年
-              if (targetDate <= now || targetDate.getDate() !== sdDay) {
-                targetDate = new Date(
-                  now.getFullYear() + 1,
-                  sdMonth - 1,
-                  sdDay,
-                  9, 0, 0, 0
-                );
-              }
-              break;
-          }
-          break;
-        }
-      }
-    } else {
-      // 中文絕對時間模式 - 修正版本
-      const patterns = [
-        // 2024年12月25日 下午3:30
-        {
-          regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-          type: 'full_date_time'
-        },
-        // 12月25日 下午3:30 或 12月25號9點30分 - 優先處理帶時間的
-        {
-          regex: /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-          type: 'month_day_time'
-        },
-        // 12月25日 10點（沒有分鐘）
-        {
-          regex: /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時]/g,
-          type: 'month_day_hour'
-        },
-        // 25日 下午3:30 或 25號 下午3:30 - 優先處理帶時間的
-        {
-          regex: /(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-          type: 'day_time'
-        },
-        // 2024年12月25日（沒有時間）
-        {
-          regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]/g,
-          type: 'full_date'
-        },
-        // 12月25日（沒有時間）- 放在最後確保不會誤匹配
-        {
-          regex: /(\d{1,2})月(\d{1,2})[日號](?!\s*\d)/g,
-          type: 'month_day'
-        },
-        // 支援簡單格式：9/27 9點30分、9-27 9:30
-        {
-          regex: /(\d{1,2})[\/\-](\d{1,2})\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-          type: 'short_date_time'
-        },
-        // 支援簡單格式：9/27 9點、9-27 10點（沒有分鐘）
-        {
-          regex: /(\d{1,2})[\/\-](\d{1,2})\s*(上午|下午)?(\d{1,2})[點時]/g,
-          type: 'short_date_hour'
-        },
-        // 支援簡單格式：9/27、9-27（沒有時間）
-        {
-          regex: /(\d{1,2})[\/\-](\d{1,2})(?!\s*\d)/g,
-          type: 'short_date'
-        }
-      ];
-
-      for (let pattern of patterns) {
-        pattern.regex.lastIndex = 0;
-        const match = pattern.regex.exec(text);
-        if (match) {
-          matched = true;
-          matchText = match[0];
-          
-          let hour, minute;
-          
-          switch (pattern.type) {
-            case 'full_date_time':
-              hour = parseInt(match[5]);
-              minute = parseInt(match[6]);
-              if (match[4] === '下午' && hour < 12) hour += 12;
-              if (match[4] === '上午' && hour === 12) hour = 0;
-              
-              targetDate = new Date(
-                parseInt(match[1]),
-                parseInt(match[2]) - 1,
-                parseInt(match[3]),
-                hour, minute, 0, 0
-              );
-              break;
-              
-            case 'month_day_time':
-              const month = parseInt(match[1]);
-              const day = parseInt(match[2]);
-              hour = parseInt(match[4]);
-              minute = parseInt(match[5]) || 0;
-              
-              if (match[3] === '下午' && hour < 12) hour += 12;
-              if (match[3] === '上午' && hour === 12) hour = 0;
-              
-              // 創建目標日期
-              targetDate = new Date(
-                now.getFullYear(),
-                month - 1,
-                day,
-                hour, minute, 0, 0
-              );
-              
-              // 檢查日期是否有效
-              if (targetDate.getDate() !== day) {
-                // 如果當前月份沒有這一天，嘗試下個月
-                targetDate = new Date(
-                  now.getFullYear(),
-                  month,  // 下個月
-                  day,
-                  hour, minute, 0, 0
-                );
-              }
-              
-              // 如果日期已過，設定為明年同月
-              if (targetDate <= now) {
-                targetDate = new Date(
-                  now.getFullYear() + 1,
-                  month - 1,
-                  day,
-                  hour, minute, 0, 0
-                );
-              }
-              break;
-
-            case 'month_day_hour':
-              const monthH = parseInt(match[1]);
-              const dayH = parseInt(match[2]);
-              hour = parseInt(match[4]);
-              
-              if (match[3] === '下午' && hour < 12) hour += 12;
-              if (match[3] === '上午' && hour === 12) hour = 0;
-              
-              // 創建目標日期
-              targetDate = new Date(
-                now.getFullYear(),
-                monthH - 1,
-                dayH,
-                hour,
-                0, // 分鐘設為0
-                0, 0
-              );
-              
-              // 檢查日期是否有效
-              if (targetDate.getDate() !== dayH) {
-                // 如果當前月份沒有這一天，嘗試下個月
-                targetDate = new Date(
-                  now.getFullYear(),
-                  monthH,  // 下個月
-                  dayH,
-                  hour,
-                  0,
-                  0, 0
-                );
-              }
-              
-              // 如果日期已過，設定為明年同月
-              if (targetDate <= now) {
-                targetDate = new Date(
-                  now.getFullYear() + 1,
-                  monthH - 1,
-                  dayH,
-                  hour,
-                  0,
-                  0, 0
-                );
-              }
-              break;
-              
-            case 'day_time':
-              const dayOnly = parseInt(match[1]);
-              hour = parseInt(match[3]);
-              minute = parseInt(match[4]) || 0;
-              if (match[2] === '下午' && hour < 12) hour += 12;
-              if (match[2] === '上午' && hour === 12) hour = 0;
-              
-              // 先嘗試當前月份
-              targetDate = new Date(
-                now.getFullYear(),
-                now.getMonth(),
-                dayOnly,
-                hour, minute, 0, 0
-              );
-              
-              // 檢查該日期是否有效且未過期
-              if (targetDate.getDate() !== dayOnly || targetDate <= now) {
-                // 嘗試下個月
-                targetDate = new Date(
-                  now.getFullYear(),
-                  now.getMonth() + 1,
-                  dayOnly,
-                  hour, minute, 0, 0
-                );
-                
-                // 如果下個月也無效，嘗試明年同月
-                if (targetDate.getDate() !== dayOnly) {
-                  targetDate = new Date(
-                    now.getFullYear() + 1,
-                    now.getMonth(),
-                    dayOnly,
-                    hour, minute, 0, 0
-                  );
-                }
-              }
-              break;
-              
-            case 'short_date_time':
-              const shortMonth = parseInt(match[1]);
-              const shortDay = parseInt(match[2]);
-              hour = parseInt(match[4]);
-              minute = parseInt(match[5]) || 0;
-              
-              if (match[3] === '下午' && hour < 12) hour += 12;
-              if (match[3] === '上午' && hour === 12) hour = 0;
-              
-              targetDate = new Date(
-                now.getFullYear(),
-                shortMonth - 1,
-                shortDay,
-                hour, minute, 0, 0
-              );
-              
-              // 如果日期已過或無效，設定為明年
-              if (targetDate <= now || targetDate.getDate() !== shortDay) {
-                targetDate = new Date(
-                  now.getFullYear() + 1,
-                  shortMonth - 1,
-                  shortDay,
-                  hour, minute, 0, 0
-                );
-              }
-              break;
-
-            case 'short_date_hour':
-              const shortHourMonth = parseInt(match[1]);
-              const shortHourDay = parseInt(match[2]);
-              hour = parseInt(match[4]);
-              
-              if (match[3] === '下午' && hour < 12) hour += 12;
-              if (match[3] === '上午' && hour === 12) hour = 0;
-              
-              targetDate = new Date(
-                now.getFullYear(),
-                shortHourMonth - 1,
-                shortHourDay,
-                hour,
-                0, // 分鐘設為0
