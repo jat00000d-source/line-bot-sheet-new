@@ -1,4 +1,4 @@
-// utils/dateParser.js - 修正版本
+// utils/dateParser.js - 完整修正版本
 class DateParser {
   constructor(language = 'zh') {
     this.language = language;
@@ -748,6 +748,68 @@ class DateParser {
           break;
         }
       }
+    }
+
+    if (matched) {
+      result.success = true;
+      result.datetime = targetDate.toISOString();
+      result.remainingText = text.replace(matchText, '').trim();
+    }
+
+    return result;
+  }
+
+  /**
+   * 解析自然語言中的星期
+   */
+  parseWeekday(text) {
+    const result = {
+      success: false,
+      weekday: null,
+      remainingText: text
+    };
+
+    let weekdayMap;
+    let patterns;
+
+    if (this.language === 'ja') {
+      weekdayMap = {
+        '月曜': 1, '火曜': 2, '水曜': 3, '木曜': 4, '金曜': 5, '土曜': 6, '日曜': 0,
+        '月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6, '日': 0
+      };
+      patterns = [/(月曜日?|火曜日?|水曜日?|木曜日?|金曜日?|土曜日?|日曜日?)/g];
+    } else {
+      weekdayMap = {
+        '週一': 1, '週二': 2, '週三': 3, '週四': 4, '週五': 5, '週六': 6, '週日': 0,
+        '星期一': 1, '星期二': 2, '星期三': 3, '星期四': 4, '星期五': 5, '星期六': 6, '星期日': 0,
+        '禮拜一': 1, '禮拜二': 2, '禮拜三': 3, '禮拜四': 4, '禮拜五': 5, '禮拜六': 6, '禮拜日': 0
+      };
+      patterns = [/(週[一二三四五六日]|星期[一二三四五六日]|禮拜[一二三四五六日])/g];
+    }
+
+    for (let pattern of patterns) {
+      pattern.lastIndex = 0;
+      const match = pattern.exec(text);
+      if (match) {
+        const dayStr = match[1];
+        const weekday = weekdayMap[dayStr];
+        
+        if (weekday !== undefined) {
+          result.success = true;
+          result.weekday = weekday;
+          result.remainingText = text.replace(match[0], '').trim();
+          break;
+        }
+      }
+    }
+
+    return result;
+  }
+}
+
+module.exports = DateParser;
+        }
+      }
     } else {
       const patterns = [
         /(\d{1,2})[點時:](\d{1,2})[分:]?/g,
@@ -771,4 +833,18 @@ class DateParser {
             minute = parseInt(match[3]);
             
             const period = match[1];
-            if (period === '下午' && hour
+            if (period === '下午' && hour < 12) hour += 12;
+            if (period === '上午' && hour === 12) hour = 0;
+            if (period === '晚上' && hour < 12) hour += 12;
+            if (period === '中午' && hour === 12) hour = 12;
+            if (period === '早上' && hour >= 6 && hour < 12) hour = hour;
+            if (period === '早上' && hour < 6) hour += 6;
+          }
+          
+          targetDate.setHours(hour, minute, 0, 0);
+          
+          // 如果時間已過，設定為明天
+          if (targetDate <= now) {
+            targetDate.setDate(targetDate.getDate() + 1);
+          }
+          break;
