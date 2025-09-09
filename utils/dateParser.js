@@ -260,18 +260,44 @@ class DateParser {
               targetDate.setFullYear(targetDate.getFullYear() + 1);
             }
           } else if (match.length === 4) {
-            // 僅日期和時間
+            // 僅日期和時間 - 這裡是關鍵修正！
+            const day = parseInt(match[1]);
+            const hour = parseInt(match[2]);
+            const minute = parseInt(match[3]);
+            
+            // 先嘗試當前月份
             targetDate = new Date(
               now.getFullYear(),
               now.getMonth(),
-              parseInt(match[1]),
-              parseInt(match[2]),
-              parseInt(match[3]),
+              day,
+              hour,
+              minute,
               0, 0
             );
-            // 如果日期已過，則設定為下個月
-            if (targetDate < now) {
-              targetDate.setMonth(targetDate.getMonth() + 1);
+            
+            // 檢查該日期是否有效且未過期
+            if (targetDate.getDate() !== day || targetDate < now) {
+              // 如果日期無效或已過期，嘗試下個月
+              targetDate = new Date(
+                now.getFullYear(),
+                now.getMonth() + 1,
+                day,
+                hour,
+                minute,
+                0, 0
+              );
+              
+              // 如果下個月也無效，嘗試明年同月
+              if (targetDate.getDate() !== day) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  now.getMonth(),
+                  day,
+                  hour,
+                  minute,
+                  0, 0
+                );
+              }
             }
           }
           break;
@@ -284,7 +310,7 @@ class DateParser {
         /(\d{4})年(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
         // 12月25日 下午3:30
         /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-        // 25日 下午3:30
+        // 25日 下午3:30 或 25號 下午3:30
         /(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g
       ];
 
@@ -309,7 +335,7 @@ class DateParser {
               hour, minute, 0, 0
             );
           } else if (match.length === 6) {
-            // 不包含年份
+            // 不包含年份，包含月份
             hour = parseInt(match[4]);
             minute = parseInt(match[5]);
             if (match[3] === '下午' && hour < 12) hour += 12;
@@ -325,20 +351,40 @@ class DateParser {
               targetDate.setFullYear(targetDate.getFullYear() + 1);
             }
           } else if (match.length === 5) {
-            // 僅日期和時間
+            // 僅日期和時間 - 關鍵修正！
+            const day = parseInt(match[1]);
             hour = parseInt(match[3]);
             minute = parseInt(match[4]);
             if (match[2] === '下午' && hour < 12) hour += 12;
             if (match[2] === '上午' && hour === 12) hour = 0;
             
+            // 先嘗試當前月份
             targetDate = new Date(
               now.getFullYear(),
               now.getMonth(),
-              parseInt(match[1]),
+              day,
               hour, minute, 0, 0
             );
-            if (targetDate < now) {
-              targetDate.setMonth(targetDate.getMonth() + 1);
+            
+            // 檢查該日期是否有效且未過期
+            if (targetDate.getDate() !== day || targetDate < now) {
+              // 如果日期無效或已過期，嘗試下個月
+              targetDate = new Date(
+                now.getFullYear(),
+                now.getMonth() + 1,
+                day,
+                hour, minute, 0, 0
+              );
+              
+              // 如果下個月也無效，嘗試明年同月
+              if (targetDate.getDate() !== day) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  now.getMonth(),
+                  day,
+                  hour, minute, 0, 0
+                );
+              }
             }
           }
           break;
