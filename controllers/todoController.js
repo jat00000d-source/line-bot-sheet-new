@@ -1,14 +1,14 @@
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const moment = require('moment-timezone');
 const { createServiceAccountAuth } = require('../utils/envValidator');
-const ReminderParser = require('../parsers/reminderParser');
+const DateParser = require('../utils/dateParser'); // 改用 DateParser
 
 class GoogleSheetsReminderController {
   constructor(lineClient) {
     this.lineClient = lineClient;
     this.doc = null;
     this.reminderSheetName = 'Reminders';
-    this.reminderParser = new ReminderParser();
+    this.dateParser = new DateParser('ja'); // 使用日文模式
   }
 
   async getGoogleSheet() {
@@ -53,16 +53,59 @@ class GoogleSheetsReminderController {
     }
   }
 
+  // 新增：解析提醒指令
+  parseReminderCommand(text) {
+    console.log('🔍 解析提醒指令:', text);
+    
+    const parseResult = this.dateParser.parseDateTime(text);
+    console.log('🔍 DateParser 原始結果:', parseResult);
+    
+    if (parseResult.success) {
+      const datetime = moment(parseResult.datetime).tz('Asia/Tokyo');
+      const content = parseResult.remainingText || text.replace(/\d+[月\/\-]\d+[日號]?\s*\d+[點時:]\d*[分:]?/g, '').trim();
+      
+      console.log('✅ 解析成功:', {
+        datetime: datetime.format('YYYY-MM-DD HH:mm:ss'),
+        recurring: null,
+        content: content
+      });
+      
+      return {
+        datetime: datetime,
+        recurring: null,
+        recurringData: null,
+        content: content
+      };
+    } else {
+      // 如果解析失敗，設定為明天 9 點
+      const fallbackTime = moment().tz('Asia/Tokyo').add(1, 'day').hour(9).minute(0).second(0);
+      console.log('⚠️ 解析失敗，使用預設時間:', fallbackTime.format('YYYY-MM-DD HH:mm:ss'));
+      
+      return {
+        datetime: fallbackTime,
+        recurring: null,
+        recurringData: null,
+        content: text
+      };
+    }
+  }
+
+  // 新增：計算下次執行時間
+  calculateNextExecution(datetime, recurring, recurringData) {
+    // 簡化版，只處理單次提醒
+    return datetime.clone();
+  }
+
   async handleTodo(event, command, language) {
     try {
       const sheet = await this.getReminderSheet();
       const now = moment().tz('Asia/Tokyo');
       
-      // 解析提醒內容 - 使用更新的解析器
+      // 解析提醒內容 - 使用 DateParser
       const reminderText = command.text || command.reminder;
       console.log('🔍 原始提醒文字:', reminderText);
       
-      const reminderData = this.reminderParser.parseReminderCommand(reminderText);
+      const reminderData = this.parseReminderCommand(reminderText);
       console.log('📋 解析結果:', {
         content: reminderData.content,
         datetime: reminderData.datetime.format('YYYY-MM-DD HH:mm:ss'),
@@ -73,7 +116,7 @@ class GoogleSheetsReminderController {
       const reminderId = `R${now.format('YYMMDDHHmmss')}${Math.random().toString(36).substr(2, 3)}`;
       
       // 計算下次執行時間
-      const nextExecution = this.reminderParser.calculateNextExecution(
+      const nextExecution = this.calculateNextExecution(
         reminderData.datetime, 
         reminderData.recurring, 
         reminderData.recurringData
@@ -251,7 +294,7 @@ class GoogleSheetsReminderController {
       if (recurring && recurring !== '單次') {
         // 計算下次執行時間
         const currentNext = moment(reminder.get('下次執行時間'));
-        const nextExecution = this.reminderParser.calculateNextExecution(
+        const nextExecution = this.calculateNextExecution(
           currentNext, 
           recurring, 
           recurringData
