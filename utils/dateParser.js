@@ -1,4 +1,4 @@
-// utils/dateParser.js
+// utils/dateParser.js - 保守修正版本（保留所有原有功能）
 class DateParser {
   constructor(language = 'zh') {
     this.language = language;
@@ -84,6 +84,7 @@ class DateParser {
       ];
 
       for (let pattern of patterns) {
+        pattern.regex.lastIndex = 0; // 重置正則表達式狀態
         const match = pattern.regex.exec(text);
         if (match) {
           matched = true;
@@ -146,6 +147,7 @@ class DateParser {
       ];
 
       for (let pattern of patterns) {
+        pattern.regex.lastIndex = 0; // 重置正則表達式狀態
         const match = pattern.regex.exec(text);
         if (match) {
           matched = true;
@@ -204,7 +206,7 @@ class DateParser {
   }
 
   /**
-   * 解析絕對時間（具體日期）
+   * 解析絕對時間（具體日期） - 只修正關鍵bug
    */
   parseAbsoluteTime(text) {
     const result = {
@@ -230,6 +232,7 @@ class DateParser {
       ];
 
       for (let pattern of patterns) {
+        pattern.lastIndex = 0; // 重置正則表達式狀態
         const match = pattern.exec(text);
         if (match) {
           matched = true;
@@ -260,7 +263,7 @@ class DateParser {
               targetDate.setFullYear(targetDate.getFullYear() + 1);
             }
           } else if (match.length === 4) {
-            // 僅日期和時間 - 這裡是關鍵修正！
+            // 僅日期和時間
             const day = parseInt(match[1]);
             const hour = parseInt(match[2]);
             const minute = parseInt(match[3]);
@@ -308,13 +311,14 @@ class DateParser {
       const patterns = [
         // 2024年12月25日 下午3:30
         /(\d{4})年(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-        // 12月25日 下午3:30
+        // 12月25日 下午3:30 或 12月25號9點
         /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
         // 25日 下午3:30 或 25號 下午3:30
         /(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g
       ];
 
       for (let pattern of patterns) {
+        pattern.lastIndex = 0; // 重置正則表達式狀態 - 關鍵修正！
         const match = pattern.exec(text);
         if (match) {
           matched = true;
@@ -335,26 +339,33 @@ class DateParser {
               hour, minute, 0, 0
             );
           } else if (match.length === 6) {
-            // 不包含年份，包含月份
+            // 不包含年份，包含月份 - 關鍵修正！
+            const month = parseInt(match[1]);
+            const day = parseInt(match[2]);
             hour = parseInt(match[4]);
-            minute = parseInt(match[5]);
+            minute = parseInt(match[5]) || 0; // 提供預設值
+            
             if (match[3] === '下午' && hour < 12) hour += 12;
             if (match[3] === '上午' && hour === 12) hour = 0;
             
+            // 先嘗試當年的該月份
             targetDate = new Date(
               now.getFullYear(),
-              parseInt(match[1]) - 1,
-              parseInt(match[2]),
+              month - 1, // JavaScript 月份從0開始
+              day,
               hour, minute, 0, 0
             );
+            
+            // 如果日期已過，設定為明年
             if (targetDate < now) {
               targetDate.setFullYear(targetDate.getFullYear() + 1);
             }
+            
           } else if (match.length === 5) {
-            // 僅日期和時間 - 關鍵修正！
+            // 僅日期和時間
             const day = parseInt(match[1]);
             hour = parseInt(match[3]);
-            minute = parseInt(match[4]);
+            minute = parseInt(match[4]) || 0;
             if (match[2] === '下午' && hour < 12) hour += 12;
             if (match[2] === '上午' && hour === 12) hour = 0;
             
@@ -424,6 +435,7 @@ class DateParser {
       ];
 
       for (let pattern of patterns) {
+        pattern.lastIndex = 0; // 重置狀態
         const match = pattern.exec(text);
         if (match) {
           matched = true;
@@ -460,6 +472,7 @@ class DateParser {
       ];
 
       for (let pattern of patterns) {
+        pattern.lastIndex = 0; // 重置狀態
         const match = pattern.exec(text);
         if (match) {
           matched = true;
@@ -532,6 +545,7 @@ class DateParser {
     }
 
     for (let pattern of patterns) {
+      pattern.lastIndex = 0; // 重置狀態
       const match = pattern.exec(text);
       if (match) {
         const dayStr = match[1];
