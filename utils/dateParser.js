@@ -388,6 +388,33 @@ class DateParser {
               }
               break;
               
+            case 'short_date_hour':
+              const shortHourMonth = parseInt(match[1]);
+              const shortHourDay = parseInt(match[2]);
+              const shortHourHour = parseInt(match[3]);
+              
+              targetDate = new Date(
+                now.getFullYear(),
+                shortHourMonth - 1,
+                shortHourDay,
+                shortHourHour,
+                0, // 分鐘設為0
+                0, 0
+              );
+              
+              // 如果日期已過或無效，設定為明年
+              if (targetDate <= now || targetDate.getDate() !== shortHourDay) {
+                targetDate = new Date(
+                  now.getFullYear() + 1,
+                  shortHourMonth - 1,
+                  shortHourDay,
+                  shortHourHour,
+                  0,
+                  0, 0
+                );
+              }
+              break;
+              
             case 'full_date':
               targetDate = new Date(
                 parseInt(match[1]),
