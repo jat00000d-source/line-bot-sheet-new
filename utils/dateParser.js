@@ -797,17 +797,8 @@ class DateParser {
         if (weekday !== undefined) {
           result.success = true;
           result.weekday = weekday;
-          result.remainingText = text.replace(match[0], '').trim();
+       result.remainingText = text.replace(match[0], '').trim();
           break;
-        }
-      }
-    }
-
-    return result;
-  }
-}
-
-module.exports = DateParser;
         }
       }
     } else {
@@ -816,7 +807,6 @@ module.exports = DateParser;
         /(上午|下午)(\d{1,2})[點時:](\d{1,2})[分:]?/g,
         /(早上|中午|下午|晚上)(\d{1,2})[點時:](\d{1,2})[分:]?/g
       ];
-
       for (let pattern of patterns) {
         pattern.lastIndex = 0;
         const match = pattern.exec(text);
@@ -848,3 +838,11 @@ module.exports = DateParser;
             targetDate.setDate(targetDate.getDate() + 1);
           }
           break;
+        }
+      }
+    }
+    return result;
+  }
+}
+
+module.exports = DateParser;
