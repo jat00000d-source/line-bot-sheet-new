@@ -1,579 +1,589 @@
-// utils/dateParser.js - 完整版日期解析器
-class DateParser {
-  constructor(language = 'zh') {
-    this.language = language;
-  }
+// parsers/dateTimeParser.js - 修復版本
+const { LANGUAGES } = require('../constants/todoMessage');
 
-  /**
-   * 主要解析方法
-   * @param {string} text - 輸入文字
-   * @param {string} defaultType - 預設類型
-   * @returns {Object} 解析結果
-   */
-  parseDateTime(text, defaultType = 'once') {
-    const result = {
-      success: false,
-      datetime: null,
-      type: defaultType,
-      interval: null,
-      remainingText: text
-    };
-
-    try {
-      // 1. 相對時間解析（明天、下週等）
-      const relativeResult = this.parseRelativeTime(text);
-      if (relativeResult.success) {
-        result.success = true;
-        result.datetime = relativeResult.datetime;
-        result.remainingText = relativeResult.remainingText;
-        return result;
-      }
-
-      // 2. 絕對時間解析（具體日期）
-      const absoluteResult = this.parseAbsoluteTime(text);
-      if (absoluteResult.success) {
-        result.success = true;
-        result.datetime = absoluteResult.datetime;
-        result.remainingText = absoluteResult.remainingText;
-        return result;
-      }
-
-      // 3. 時間點解析（僅時間，無日期）
-      const timeResult = this.parseTimeOnly(text);
-      if (timeResult.success) {
-        result.success = true;
-        result.datetime = timeResult.datetime;
-        result.remainingText = timeResult.remainingText;
-        return result;
-      }
-
-      // 4. 週期性任務解析
-      const recurringResult = this.parseRecurring(text);
-      if (recurringResult.success) {
-        result.success = true;
-        result.datetime = recurringResult.datetime;
-        result.type = 'recurring';
-        result.interval = recurringResult.interval;
-        result.remainingText = recurringResult.remainingText;
-        return result;
-      }
-
-    } catch (error) {
-      console.error('日期解析錯誤:', error);
+class DateTimeParser {
+    constructor() {
+        this.timePatterns = {
+            zh: {
+                // 絕對時間 - 增加對 "點" 的支援
+                absolute: [
+                    // 完整日期時間格式
+                    /(\d{4})[年\-\/](\d{1,2})[月\-\/](\d{1,2})日?\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /(\d{4})[年\-\/](\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    
+                    // 月日時間格式
+                    /(\d{1,2})[月\-\/](\d{1,2})日?\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /(\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    
+                    // 簡化日期格式 (9/18 19點)
+                    /(\d{1,2})\/(\d{1,2})\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /(\d{1,2})\/(\d{1,2})\s*(\d{1,2}):(\d{1,2})/,
+                    
+                    // 相對日期 + 時間
+                    /(明天|明日)\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /(明天|明日)\s*(\d{1,2}):(\d{1,2})/,
+                    /(後天)\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /(後天)\s*(\d{1,2}):(\d{1,2})/,
+                    /(今天|今日)\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /(今天|今日)\s*(\d{1,2}):(\d{1,2})/,
+                    
+                    // 只有時間格式
+                    /(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /(\d{1,2}):(\d{1,2})/,
+                    
+                    // 半點格式
+                    /(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]半/,
+                    /(\d{1,2}):30/
+                ],
+                
+                // 相對時間
+                relative: [
+                    /(今天|今日)/,
+                    /(明天|明日)/,
+                    /(後天)/,
+                    /(\d+)\s*天後/,
+                    /(\d+)\s*小時後/,
+                    /(\d+)\s*分鐘後/,
+                    /(下週|下星期)/,
+                    /(下個月|下月)/
+                ],
+                
+                // 重複時間
+                recurring: [
+                    /每天\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /每天\s*(\d{1,2}):(\d{1,2})/,
+                    /每週([一二三四五六日天])\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /每週([一二三四五六日天])\s*(\d{1,2}):(\d{1,2})/,
+                    /每月(\d{1,2})號\s*(?:晚上|上午|下午|早上)?\s*(\d{1,2})[：:點]\s*(\d{1,2})?/,
+                    /每月(\d{1,2})號\s*(\d{1,2}):(\d{1,2})/,
+                    /每(\d+)天/,
+                    /每(\d+)週/,
+                    /每(\d+)個月/
+                ]
+            },
+            
+            ja: {
+                // 絶対時間
+                absolute: [
+                    /(\d{4})[年\-\/](\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2})[月\-\/](\d{1,2})日?\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d{1,2}):(\d{1,2})/,
+                    /(明日|あした)\s*(\d{1,2}):(\d{1,2})/,
+                    /(あさって|明後日)\s*(\d{1,2}):(\d{1,2})/,
+                    /(今日|きょう)\s*(\d{1,2}):(\d{1,2})/
+                ],
+                
+                // 相対時間
+                relative: [
+                    /(今日|きょう)/,
+                    /(明日|あした)/,
+                    /(明後日|あさって)/,
+                    /(\d+)\s*日後/,
+                    /(\d+)\s*時間後/,
+                    /(\d+)\s*分後/,
+                    /(来週|らいしゅう)/,
+                    /(来月|らいげつ)/
+                ],
+                
+                // 繰り返し時間
+                recurring: [
+                    /毎日\s*(\d{1,2}):(\d{1,2})/,
+                    /毎週([月火水木金土日])\s*(\d{1,2}):(\d{1,2})/,
+                    /毎月(\d{1,2})日\s*(\d{1,2}):(\d{1,2})/,
+                    /(\d+)日ごと/,
+                    /(\d+)週間ごと/,
+                    /(\d+)ヶ月ごと/
+                ]
+            }
+        };
     }
-
-    return result;
-  }
-
-  /**
-   * 解析相對時間
-   */
-  parseRelativeTime(text) {
-    const result = {
-      success: false,
-      datetime: null,
-      remainingText: text
-    };
-
-    const now = new Date();
-    let targetDate = new Date(now);
-    let matched = false;
-    let matchText = '';
-
-    // 相對時間模式
-    const patterns = [
-      // 基本相對時間
-      { regex: /今天(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 0, unit: 'day' },
-      { regex: /明天(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 1, unit: 'day' },
-      { regex: /後天(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 2, unit: 'day' },
-      { regex: /大後天(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 3, unit: 'day' },
-      
-      // 週相關
-      { regex: /下週(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 7, unit: 'day' },
-      { regex: /下下週(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 14, unit: 'day' },
-      
-      // 月相關
-      { regex: /下個?月(\s*(\d{1,2})[號日])?(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 1, unit: 'month' },
-      { regex: /下下個?月(\s*(\d{1,2})[號日])?(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 2, unit: 'month' },
-      
-      // 自定義天數
-      { regex: /(\d+)天後(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 0, unit: 'custom_day' },
-      { regex: /(\d+)[個]?小時後/g, offset: 0, unit: 'hour' },
-      { regex: /(\d+)[個]?分鐘?後/g, offset: 0, unit: 'minute' },
-      
-      // 星期
-      { regex: /下週?([一二三四五六日天])(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, offset: 0, unit: 'weekday' }
-    ];
-
-    for (let pattern of patterns) {
-      pattern.regex.lastIndex = 0;
-      const match = pattern.regex.exec(text);
-      if (match) {
-        matched = true;
-        matchText = match[0];
-        
-        switch (pattern.unit) {
-          case 'day':
-            targetDate.setDate(targetDate.getDate() + pattern.offset);
-            if (match[2] && match[3]) {
-              targetDate.setHours(parseInt(match[2]), parseInt(match[3]), 0, 0);
+    
+    // 解析時間字串
+    parseDateTime(text, language = 'zh') {
+        try {
+            const lang = language || 'zh';
+            const patterns = this.timePatterns[lang];
+            
+            if (!patterns) {
+                console.warn(`不支援的語言: ${lang}`);
+                return this.createFailureResult(text);
+            }
+            
+            console.log(`🔍 開始解析時間: "${text}", 語言: ${lang}`);
+            
+            // 嘗試解析絕對時間
+            let result = this.parseAbsoluteTime(text, patterns.absolute, lang);
+            if (result && result.isValid) {
+                console.log(`✅ 絕對時間解析成功:`, result);
+                return result;
+            }
+            
+            // 嘗試解析相對時間
+            result = this.parseRelativeTime(text, patterns.relative, lang);
+            if (result && result.isValid) {
+                console.log(`✅ 相對時間解析成功:`, result);
+                return result;
+            }
+            
+            // 嘗試解析重複時間
+            result = this.parseRecurringTime(text, patterns.recurring, lang);
+            if (result && result.isValid) {
+                console.log(`✅ 重複時間解析成功:`, result);
+                return result;
+            }
+            
+            console.log(`❌ 所有解析方式都失敗`);
+            return this.createFailureResult(text);
+            
+        } catch (error) {
+            console.error('解析時間時發生錯誤:', error);
+            return this.createFailureResult(text);
+        }
+    }
+    
+    // 創建失敗結果
+    createFailureResult(text) {
+        return {
+            success: false,
+            datetime: null,
+            type: 'once',
+            interval: null,
+            remainingText: text,
+            isValid: false
+        };
+    }
+    
+    // 解析絕對時間
+    parseAbsoluteTime(text, patterns, language) {
+        for (let i = 0; i < patterns.length; i++) {
+            const pattern = patterns[i];
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    console.log(`🎯 匹配到絕對時間模式 ${i}:`, match);
+                    const result = this.extractAbsoluteDateTime(match, text, language);
+                    if (result && result.isValid) {
+                        return result;
+                    }
+                }
+            } catch (error) {
+                console.warn(`絕對時間解析錯誤 (模式 ${i}):`, error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 解析相對時間
+    parseRelativeTime(text, patterns, language) {
+        for (let i = 0; i < patterns.length; i++) {
+            const pattern = patterns[i];
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    console.log(`🎯 匹配到相對時間模式 ${i}:`, match);
+                    const result = this.extractRelativeDateTime(match, text, language);
+                    if (result && result.isValid) {
+                        return result;
+                    }
+                }
+            } catch (error) {
+                console.warn(`相對時間解析錯誤 (模式 ${i}):`, error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 解析重複時間
+    parseRecurringTime(text, patterns, language) {
+        for (let i = 0; i < patterns.length; i++) {
+            const pattern = patterns[i];
+            try {
+                const match = text.match(pattern);
+                if (match) {
+                    console.log(`🎯 匹配到重複時間模式 ${i}:`, match);
+                    const result = this.extractRecurringDateTime(match, text, language);
+                    if (result && result.isValid) {
+                        return result;
+                    }
+                }
+            } catch (error) {
+                console.warn(`重複時間解析錯誤 (模式 ${i}):`, error);
+                continue;
+            }
+        }
+        return null;
+    }
+    
+    // 提取絕對時間
+    extractAbsoluteDateTime(match, originalText, language) {
+        try {
+            const now = new Date();
+            let year = now.getFullYear();
+            let month = now.getMonth() + 1;
+            let day = now.getDate();
+            let hour = 9; // 預設時間
+            let minute = 0;
+            
+            console.log(`🔧 開始提取絕對時間:`, match);
+            
+            // 判斷匹配類型並解析
+            if (this.isRelativeDateMatch(match)) {
+                // 相對日期 (今天/明天/後天)
+                const relativeDays = this.getRelativeDays(match[1]);
+                const targetDate = new Date(now);
+                targetDate.setDate(targetDate.getDate() + relativeDays);
+                
+                year = targetDate.getFullYear();
+                month = targetDate.getMonth() + 1;
+                day = targetDate.getDate();
+                
+                // 提取時間
+                const timeInfo = this.extractTimeFromMatch(match, 2);
+                hour = timeInfo.hour;
+                minute = timeInfo.minute;
+                
+            } else if (this.isFullDateMatch(match)) {
+                // 完整日期格式
+                year = parseInt(match[1]);
+                month = parseInt(match[2]);
+                day = parseInt(match[3]);
+                
+                const timeInfo = this.extractTimeFromMatch(match, 4);
+                hour = timeInfo.hour;
+                minute = timeInfo.minute;
+                
+            } else if (this.isMonthDayMatch(match)) {
+                // 月日格式
+                month = parseInt(match[1]);
+                day = parseInt(match[2]);
+                
+                const timeInfo = this.extractTimeFromMatch(match, 3);
+                hour = timeInfo.hour;
+                minute = timeInfo.minute;
+                
+            } else if (this.isSimpleDateMatch(match)) {
+                // 簡化日期格式 (9/18)
+                month = parseInt(match[1]);
+                day = parseInt(match[2]);
+                
+                const timeInfo = this.extractTimeFromMatch(match, 3);
+                hour = timeInfo.hour;
+                minute = timeInfo.minute;
+                
             } else {
-              targetDate.setHours(9, 0, 0, 0);
+                // 只有時間格式
+                const timeInfo = this.extractTimeFromMatch(match, 1);
+                hour = timeInfo.hour;
+                minute = timeInfo.minute;
             }
-            break;
             
-          case 'month':
-            targetDate.setMonth(targetDate.getMonth() + pattern.offset);
-            if (match[2]) {
-              targetDate.setDate(parseInt(match[2]));
+            // 創建目標日期
+            const targetDate = new Date(year, month - 1, day, hour, minute, 0, 0);
+            
+            console.log(`📅 解析結果: ${year}-${month}-${day} ${hour}:${minute}`);
+            console.log(`📅 目標時間: ${targetDate.toISOString()}`);
+            console.log(`📅 現在時間: ${now.toISOString()}`);
+            
+            // 檢查日期是否有效
+            if (isNaN(targetDate.getTime())) {
+                console.error('❌ 無效的日期時間');
+                return null;
             }
-            if (match[4] && match[5]) {
-              targetDate.setHours(parseInt(match[4]), parseInt(match[5]), 0, 0);
-            } else {
-              targetDate.setHours(9, 0, 0, 0);
+            
+            // 如果是今天但時間已過，則設為明天
+            if (targetDate <= now && this.isTodayTime(originalText)) {
+                targetDate.setDate(targetDate.getDate() + 1);
+                console.log(`⏭️ 時間已過，調整為明天: ${targetDate.toISOString()}`);
             }
-            break;
             
-          case 'custom_day':
-            const days = parseInt(match[1]);
-            targetDate.setDate(targetDate.getDate() + days);
-            if (match[3] && match[4]) {
-              targetDate.setHours(parseInt(match[3]), parseInt(match[4]), 0, 0);
-            } else {
-              targetDate.setHours(9, 0, 0, 0);
-            }
-            break;
+            const isValid = targetDate > now;
             
-          case 'hour':
-            const hours = parseInt(match[1]);
-            targetDate.setHours(targetDate.getHours() + hours);
-            break;
+            return {
+                success: true,
+                datetime: targetDate.toISOString(),
+                type: 'once',
+                interval: null,
+                remainingText: originalText.replace(match[0], '').trim(),
+                isValid: isValid,
+                date: targetDate,
+                dateString: targetDate.toISOString()
+            };
             
-          case 'minute':
-            const minutes = parseInt(match[1]);
-            targetDate.setMinutes(targetDate.getMinutes() + minutes);
-            break;
-            
-          case 'weekday':
-            const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
-            const targetWeekday = weekdays.indexOf(match[1]);
-            const currentWeekday = targetDate.getDay();
-            let daysUntilTarget = (targetWeekday - currentWeekday + 7) % 7;
-            if (daysUntilTarget === 0) daysUntilTarget = 7; // 下週同一天
-            
-            targetDate.setDate(targetDate.getDate() + daysUntilTarget);
-            if (match[3] && match[4]) {
-              targetDate.setHours(parseInt(match[3]), parseInt(match[4]), 0, 0);
-            } else {
-              targetDate.setHours(9, 0, 0, 0);
-            }
-            break;
+        } catch (error) {
+            console.error('提取絕對時間時發生錯誤:', error);
+            return null;
         }
-        break;
-      }
     }
-
-    if (matched) {
-      result.success = true;
-      result.datetime = targetDate.toISOString();
-      result.remainingText = text.replace(matchText, '').trim();
-    }
-
-    return result;
-  }
-
-  /**
-   * 解析絕對時間
-   */
-  parseAbsoluteTime(text) {
-    const result = {
-      success: false,
-      datetime: null,
-      remainingText: text
-    };
-
-    const now = new Date();
-    let matched = false;
-    let matchText = '';
-    let targetDate = new Date(now);
-
-    // 絕對時間模式
-    const patterns = [
-      // 完整日期時間
-      {
-        regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-        type: 'full_date_time'
-      },
-      // 月日時間
-      {
-        regex: /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-        type: 'month_day_time'
-      },
-      // 月日（僅到小時）
-      {
-        regex: /(\d{1,2})月(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時]/g,
-        type: 'month_day_hour'
-      },
-      // 日期時間
-      {
-        regex: /(\d{1,2})[日號]\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-        type: 'day_time'
-      },
-      // 完整日期（無時間）
-      {
-        regex: /(\d{4})年(\d{1,2})月(\d{1,2})[日號]/g,
-        type: 'full_date'
-      },
-      // 月日（無時間）
-      {
-        regex: /(\d{1,2})月(\d{1,2})[日號](?!\s*\d)/g,
-        type: 'month_day'
-      },
-      // 短格式日期時間 (M/D H:M)
-      {
-        regex: /(\d{1,2})[\/\-](\d{1,2})\s*(上午|下午)?(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-        type: 'short_date_time'
-      },
-      // 短格式日期（無時間）
-      {
-        regex: /(\d{1,2})[\/\-](\d{1,2})(?!\s*\d)/g,
-        type: 'short_date'
-      }
-    ];
-
-    for (let pattern of patterns) {
-      pattern.regex.lastIndex = 0;
-      const match = pattern.regex.exec(text);
-      if (match) {
-        matched = true;
-        matchText = match[0];
+    
+    // 從匹配結果中提取時間
+    extractTimeFromMatch(match, startIndex) {
+        let hour = 9; // 預設時間
+        let minute = 0;
         
-        let hour, minute;
-        
-        switch (pattern.type) {
-          case 'full_date_time':
-            hour = parseInt(match[5]);
-            minute = parseInt(match[6]);
-            if (match[4] === '下午' && hour < 12) hour += 12;
-            if (match[4] === '上午' && hour === 12) hour = 0;
-            
-            targetDate = new Date(
-              parseInt(match[1]),
-              parseInt(match[2]) - 1,
-              parseInt(match[3]),
-              hour, minute, 0, 0
-            );
-            break;
-            
-          case 'month_day_time':
-            const month = parseInt(match[1]);
-            const day = parseInt(match[2]);
-            hour = parseInt(match[4]);
-            minute = parseInt(match[5]) || 0;
-            
-            if (match[3] === '下午' && hour < 12) hour += 12;
-            if (match[3] === '上午' && hour === 12) hour = 0;
-            
-            targetDate = new Date(
-              now.getFullYear(),
-              month - 1,
-              day,
-              hour, minute, 0, 0
-            );
-            
-            // 如果日期已過，設為明年
-            if (targetDate <= now) {
-              targetDate.setFullYear(targetDate.getFullYear() + 1);
+        // 查找時間相關的匹配組
+        for (let i = startIndex; i < match.length; i++) {
+            if (match[i] !== undefined) {
+                const value = parseInt(match[i]);
+                if (value >= 0 && value <= 24) {
+                    hour = value;
+                    // 查找分鐘
+                    if (match[i + 1] !== undefined) {
+                        const minuteValue = parseInt(match[i + 1]);
+                        if (minuteValue >= 0 && minuteValue <= 59) {
+                            minute = minuteValue;
+                        }
+                    }
+                    break;
+                }
             }
-            break;
-
-          case 'month_day_hour':
-            const monthH = parseInt(match[1]);
-            const dayH = parseInt(match[2]);
-            hour = parseInt(match[4]);
-            
-            if (match[3] === '下午' && hour < 12) hour += 12;
-            if (match[3] === '上午' && hour === 12) hour = 0;
-            
-            targetDate = new Date(
-              now.getFullYear(),
-              monthH - 1,
-              dayH,
-              hour, 0, 0, 0
-            );
-            
-            if (targetDate <= now) {
-              targetDate.setFullYear(targetDate.getFullYear() + 1);
-            }
-            break;
-            
-          case 'day_time':
-            const dayOnly = parseInt(match[1]);
-            hour = parseInt(match[3]);
-            minute = parseInt(match[4]) || 0;
-            if (match[2] === '下午' && hour < 12) hour += 12;
-            if (match[2] === '上午' && hour === 12) hour = 0;
-            
-            targetDate = new Date(
-              now.getFullYear(),
-              now.getMonth(),
-              dayOnly,
-              hour, minute, 0, 0
-            );
-            
-            // 如果日期已過，設為下個月
-            if (targetDate <= now || targetDate.getDate() !== dayOnly) {
-              targetDate.setMonth(targetDate.getMonth() + 1);
-              targetDate.setDate(dayOnly);
-            }
-            break;
-            
-          case 'full_date':
-            targetDate = new Date(
-              parseInt(match[1]),
-              parseInt(match[2]) - 1,
-              parseInt(match[3]),
-              9, 0, 0, 0
-            );
-            break;
-            
-          case 'month_day':
-            const mdMonth = parseInt(match[1]);
-            const mdDay = parseInt(match[2]);
-            
-            targetDate = new Date(
-              now.getFullYear(),
-              mdMonth - 1,
-              mdDay,
-              9, 0, 0, 0
-            );
-            
-            if (targetDate <= now) {
-              targetDate.setFullYear(targetDate.getFullYear() + 1);
-            }
-            break;
-            
-          case 'short_date_time':
-            const shortMonth = parseInt(match[1]);
-            const shortDay = parseInt(match[2]);
-            hour = parseInt(match[4]);
-            minute = parseInt(match[5]) || 0;
-            
-            if (match[3] === '下午' && hour < 12) hour += 12;
-            if (match[3] === '上午' && hour === 12) hour = 0;
-            
-            targetDate = new Date(
-              now.getFullYear(),
-              shortMonth - 1,
-              shortDay,
-              hour, minute, 0, 0
-            );
-            
-            if (targetDate <= now) {
-              targetDate.setFullYear(targetDate.getFullYear() + 1);
-            }
-            break;
-            
-          case 'short_date':
-            const sdMonth = parseInt(match[1]);
-            const sdDay = parseInt(match[2]);
-            
-            targetDate = new Date(
-              now.getFullYear(),
-              sdMonth - 1,
-              sdDay,
-              9, 0, 0, 0
-            );
-            
-            if (targetDate <= now) {
-              targetDate.setFullYear(targetDate.getFullYear() + 1);
-            }
-            break;
-        }
-        break;
-      }
-    }
-
-    if (matched) {
-      result.success = true;
-      result.datetime = targetDate.toISOString();
-      result.remainingText = text.replace(matchText, '').trim();
-    }
-
-    return result;
-  }
-
-  /**
-   * 解析時間（僅時間，預設為今天）
-   */
-  parseTimeOnly(text) {
-    const result = {
-      success: false,
-      datetime: null,
-      remainingText: text
-    };
-
-    const now = new Date();
-    let matched = false;
-    let matchText = '';
-    let targetDate = new Date(now);
-
-    const patterns = [
-      // 基本時間格式
-      /(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-      // 上午/下午格式
-      /(上午|下午)(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-      // 時段格式
-      /(早上|中午|下午|晚上)(\d{1,2})[點時:](\d{1,2})[分:]?/g,
-      // 僅小時
-      /(\d{1,2})[點時]/g,
-      // 上午/下午僅小時
-      /(上午|下午)(\d{1,2})[點時]/g
-    ];
-
-    for (let pattern of patterns) {
-      pattern.lastIndex = 0;
-      const match = pattern.exec(text);
-      if (match) {
-        matched = true;
-        matchText = match[0];
-        
-        let hour, minute = 0;
-        
-        if (match.length === 3) {
-          // 基本格式 HH:MM 或僅 HH
-          hour = parseInt(match[1]);
-          minute = parseInt(match[2]) || 0;
-        } else if (match.length === 4) {
-          // 上午/下午格式
-          hour = parseInt(match[2]);
-          minute = parseInt(match[3]) || 0;
-          
-          const period = match[1];
-          if (period === '下午' && hour < 12) hour += 12;
-          if (period === '上午' && hour === 12) hour = 0;
-          if (period === '晚上' && hour < 12) hour += 12;
-          if (period === '中午' && hour === 12) hour = 12;
-          if (period === '早上' && hour >= 6 && hour < 12) hour = hour;
-          if (period === '早上' && hour < 6) hour += 6;
         }
         
-        targetDate.setHours(hour, minute, 0, 0);
-        
-        // 如果時間已過，設為明天
-        if (targetDate <= now) {
-          targetDate.setDate(targetDate.getDate() + 1);
-        }
-        break;
-      }
-    }
-
-    if (matched) {
-      result.success = true;
-      result.datetime = targetDate.toISOString();
-      result.remainingText = text.replace(matchText, '').trim();
-    }
-
-    return result;
-  }
-
-  /**
-   * 解析週期性任務
-   */
-  parseRecurring(text) {
-    const result = {
-      success: false,
-      datetime: null,
-      interval: null,
-      remainingText: text
-    };
-
-    const now = new Date();
-    let matched = false;
-    let matchText = '';
-    let targetDate = new Date(now);
-
-    // 週期性模式
-    const patterns = [
-      { regex: /每天(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, interval: 'daily' },
-      { regex: /每週(\s*([一二三四五六日天]))?(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, interval: 'weekly' },
-      { regex: /每月(\s*(\d{1,2})[號日])?(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, interval: 'monthly' },
-      { regex: /每年(\s*(\d{1,2})月(\d{1,2})[日號])?(\s*(\d{1,2})[點時:](\d{1,2})[分:]?)?/g, interval: 'yearly' }
-    ];
-
-    for (let pattern of patterns) {
-      pattern.regex.lastIndex = 0;
-      const match = pattern.regex.exec(text);
-      if (match) {
-        matched = true;
-        matchText = match[0];
-        
-        // 設定預設時間
-        targetDate.setHours(9, 0, 0, 0);
-        
-        switch (pattern.interval) {
-          case 'daily':
-            if (match[2] && match[3]) {
-              targetDate.setHours(parseInt(match[2]), parseInt(match[3]), 0, 0);
-            }
-            if (targetDate <= now) {
-              targetDate.setDate(targetDate.getDate() + 1);
-            }
-            break;
-            
-          case 'weekly':
-            if (match[2]) {
-              const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
-              const targetWeekday = weekdays.indexOf(match[2]);
-              const currentWeekday = targetDate.getDay();
-              let daysUntilTarget = (targetWeekday - currentWeekday + 7) % 7;
-              if (daysUntilTarget === 0 && targetDate <= now) daysUntilTarget = 7;
-              
-              targetDate.setDate(targetDate.getDate() + daysUntilTarget);
-            }
-            if (match[4] && match[5]) {
-              targetDate.setHours(parseInt(match[4]), parseInt(match[5]), 0, 0);
-            }
-            break;
-            
-          case 'monthly':
-            if (match[2]) {
-              targetDate.setDate(parseInt(match[2]));
-            }
-            if (match[4] && match[5]) {
-              targetDate.setHours(parseInt(match[4]), parseInt(match[5]), 0, 0);
-            }
-            if (targetDate <= now) {
-              targetDate.setMonth(targetDate.getMonth() + 1);
-            }
-            break;
-            
-          case 'yearly':
-            if (match[2] && match[3]) {
-              targetDate.setMonth(parseInt(match[2]) - 1, parseInt(match[3]));
-            }
-            if (match[5] && match[6]) {
-              targetDate.setHours(parseInt(match[5]), parseInt(match[6]), 0, 0);
-            }
-            if (targetDate <= now) {
-              targetDate.setFullYear(targetDate.getFullYear() + 1);
-            }
-            break;
+        // 處理半點格式
+        if (match[0].includes('半')) {
+            minute = 30;
         }
         
-        result.interval = pattern.interval;
-        break;
-      }
+        return { hour, minute };
     }
-
-    if (matched) {
-      result.success = true;
-      result.datetime = targetDate.toISOString();
-      result.remainingText = text.replace(matchText, '').trim();
+    
+    // 判斷是否為相對日期匹配
+    isRelativeDateMatch(match) {
+        return match[1] && (match[1].includes('今天') || match[1].includes('今日') || 
+                           match[1].includes('明天') || match[1].includes('明日') || 
+                           match[1].includes('後天'));
     }
-
-    return result;
-  }
+    
+    // 判斷是否為完整日期匹配
+    isFullDateMatch(match) {
+        return match.length >= 6 && match[1] && match[2] && match[3] && 
+               parseInt(match[1]) > 1000; // 年份大於1000
+    }
+    
+    // 判斷是否為月日匹配
+    isMonthDayMatch(match) {
+        return match.length >= 5 && match[1] && match[2] && 
+               parseInt(match[1]) <= 12 && parseInt(match[2]) <= 31 &&
+               !match[1].includes('今') && !match[1].includes('明') && !match[1].includes('後');
+    }
+    
+    // 判斷是否為簡化日期匹配 (9/18)
+    isSimpleDateMatch(match) {
+        return match.length >= 4 && match[1] && match[2] && 
+               match[0].includes('/') && 
+               parseInt(match[1]) <= 12 && parseInt(match[2]) <= 31;
+    }
+    
+    // 獲取相對天數
+    getRelativeDays(dateStr) {
+        if (dateStr.includes('今天') || dateStr.includes('今日')) return 0;
+        if (dateStr.includes('明天') || dateStr.includes('明日')) return 1;
+        if (dateStr.includes('後天')) return 2;
+        return 0;
+    }
+    
+    // 判斷是否為今天時間
+    isTodayTime(text) {
+        return text.includes('今天') || text.includes('今日') || 
+               (!text.includes('明天') && !text.includes('明日') && 
+                !text.includes('後天') && !text.includes('/'));
+    }
+    
+    // 提取相對時間
+    extractRelativeDateTime(match, text, language) {
+        try {
+            const now = new Date();
+            let targetDate = new Date(now);
+            
+            // 從文本中提取時間
+            const timeMatch = text.match(/(\d{1,2})[：:點]\s*(\d{1,2})?|(\d{1,2}):(\d{1,2})/);
+            let hour = 9; // 預設時間
+            let minute = 0;
+            
+            if (timeMatch) {
+                if (timeMatch[1] && timeMatch[2]) {
+                    // 格式: 19點30 或 19:30
+                    hour = parseInt(timeMatch[1]);
+                    minute = parseInt(timeMatch[2]) || 0;
+                } else if (timeMatch[1]) {
+                    // 格式: 19點
+                    hour = parseInt(timeMatch[1]);
+                    minute = 0;
+                } else if (timeMatch[3] && timeMatch[4]) {
+                    // 格式: 19:30
+                    hour = parseInt(timeMatch[3]);
+                    minute = parseInt(timeMatch[4]);
+                }
+            }
+            
+            // 處理相對日期
+            if (match[1] === '今天' || match[1] === '今日') {
+                // 今天
+                targetDate.setHours(hour, minute, 0, 0);
+            } else if (match[1] === '明天' || match[1] === '明日') {
+                // 明天
+                targetDate.setDate(targetDate.getDate() + 1);
+                targetDate.setHours(hour, minute, 0, 0);
+            } else if (match[1] === '後天') {
+                // 後天
+                targetDate.setDate(targetDate.getDate() + 2);
+                targetDate.setHours(hour, minute, 0, 0);
+            } else if (match[1] && match[1].includes('天後')) {
+                // N天後
+                const days = parseInt(match[1]);
+                targetDate.setDate(targetDate.getDate() + days);
+                targetDate.setHours(hour, minute, 0, 0);
+            }
+            
+            // 如果時間已過（今天的情況），調整到明天
+            if (targetDate <= now && (match[1] === '今天' || match[1] === '今日')) {
+                targetDate.setDate(targetDate.getDate() + 1);
+            }
+            
+            const isValid = targetDate > now;
+            
+            return {
+                success: true,
+                datetime: targetDate.toISOString(),
+                type: 'once',
+                interval: null,
+                remainingText: text.replace(match[0], '').trim(),
+                isValid: isValid,
+                date: targetDate,
+                dateString: targetDate.toISOString()
+            };
+            
+        } catch (error) {
+            console.error('提取相對時間時發生錯誤:', error);
+            return null;
+        }
+    }
+    
+    // 提取重複時間
+    extractRecurringDateTime(match, text, language) {
+        try {
+            if (match[0].includes('每天')) {
+                const hour = parseInt(match[1]) || 9;
+                const minute = parseInt(match[2]) || 0;
+                
+                return {
+                    success: true,
+                    datetime: null,
+                    type: 'daily',
+                    interval: 'daily',
+                    time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`,
+                    hour: hour,
+                    minute: minute,
+                    remainingText: text.replace(match[0], '').trim(),
+                    isValid: true
+                };
+            } else if (match[0].includes('每週')) {
+                const weekday = match[1];
+                const hour = parseInt(match[2]) || 9;
+                const minute = parseInt(match[3]) || 0;
+                
+                return {
+                    success: true,
+                    datetime: null,
+                    type: 'weekly',
+                    interval: 'weekly',
+                    weekday: weekday,
+                    time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`,
+                    hour: hour,
+                    minute: minute,
+                    remainingText: text.replace(match[0], '').trim(),
+                    isValid: true
+                };
+            } else if (match[0].includes('每月')) {
+                const day = parseInt(match[1]);
+                const hour = parseInt(match[2]) || 9;
+                const minute = parseInt(match[3]) || 0;
+                
+                return {
+                    success: true,
+                    datetime: null,
+                    type: 'monthly',
+                    interval: 'monthly',
+                    day: day,
+                    time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`,
+                    hour: hour,
+                    minute: minute,
+                    remainingText: text.replace(match[0], '').trim(),
+                    isValid: true
+                };
+            }
+            
+            return null;
+            
+        } catch (error) {
+            console.error('提取重複時間時發生錯誤:', error);
+            return null;
+        }
+    }
+    
+    // 格式化時間顯示
+    formatDateTime(date, language = 'zh') {
+        if (!date) return '';
+        
+        try {
+            const options = {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            };
+            
+            const locale = language === 'ja' ? 'ja-JP' : 'zh-TW';
+            return date.toLocaleDateString(locale, options);
+        } catch (error) {
+            console.error('格式化時間時發生錯誤:', error);
+            return date.toString();
+        }
+    }
+    
+    // 檢查時間是否有效
+    isValidDateTime(dateTime) {
+        if (!dateTime) return false;
+        
+        try {
+            const now = new Date();
+            const targetDate = new Date(dateTime);
+            
+            return targetDate instanceof Date && !isNaN(targetDate.getTime()) && targetDate > now;
+        } catch (error) {
+            console.error('檢查時間有效性時發生錯誤:', error);
+            return false;
+        }
+    }
+    
+    // 取得當前時間的字串表示
+    getCurrentTimeString() {
+        return new Date().toISOString();
+    }
+    
+    // 解析時間範圍
+    parseTimeRange(text, language = 'zh') {
+        const rangePattern = /(\d{1,2})[：:點]\s*(\d{1,2})?\s*[-到至]\s*(\d{1,2})[：:點]\s*(\d{1,2})?/;
+        const match = text.match(rangePattern);
+        
+        if (match) {
+            const startHour = parseInt(match[1]);
+            const startMinute = parseInt(match[2]) || 0;
+            const endHour = parseInt(match[3]);
+            const endMinute = parseInt(match[4]) || 0;
+            
+            return {
+                start: { hour: startHour, minute: startMinute },
+                end: { hour: endHour, minute: endMinute },
+                isRange: true
+            };
+        }
+        
+        return null;
+    }
 }
 
-module.exports = DateParser;
+module.exports = DateTimeParser;
