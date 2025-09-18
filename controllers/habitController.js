@@ -4,24 +4,31 @@ const { createServiceAccountAuth } = require('../utils/envValidator');
 
 class GoogleSheetsHabitController {
   constructor(lineClient) {
-    this.spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-    this.doc = new GoogleSpreadsheet(this.spreadsheetId);
-    this.serviceAccountAuth = createServiceAccountAuth();
     this.lineClient = lineClient;
+    this.doc = null; // 延遲初始化
     this.isInitialized = false;
     
     // 設定時區
     moment.tz.setDefault('Asia/Tokyo');
   }
 
+  // 修正初始化方法，參考 expenseController.js 的方式
+  async getGoogleSheet() {
+    if (!this.doc) {
+      const serviceAccountAuth = createServiceAccountAuth();
+      this.doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEETS_ID || process.env.GOOGLE_SPREADSHEET_ID, serviceAccountAuth);
+      await this.doc.loadInfo();
+      this.isInitialized = true;
+      console.log('✅ HabitController 初始化成功');
+    }
+    return this.doc;
+  }
+
   async initialize() {
     if (this.isInitialized) return true;
     
     try {
-      await this.doc.useServiceAccountAuth(this.serviceAccountAuth);
-      await this.doc.loadInfo();
-      this.isInitialized = true;
-      console.log('✅ HabitController 初始化成功');
+      await this.getGoogleSheet();
       return true;
     } catch (error) {
       console.error('❌ HabitController 初始化失敗:', error);
@@ -39,11 +46,11 @@ class GoogleSheetsHabitController {
   // 建立新習慣
   async createHabit(userId, habitName, category = '一般', frequencyType = 'daily', frequencyValue = 1, description = '') {
     try {
-      await this.initialize();
+      const doc = await this.getGoogleSheet();
       
-      const habitsSheet = this.doc.sheetsByTitle['Habits'];
+      const habitsSheet = doc.sheetsByTitle['Habits'];
       if (!habitsSheet) {
-        throw new Error('找不到 Habits 分頁');
+        throw new Error('找不到 Habits 分頁，請先執行 setup-habit-sheets.js 建立分頁');
       }
 
       const habitId = this.generateId('habit');
@@ -72,7 +79,9 @@ class GoogleSheetsHabitController {
       console.error('❌ 建立習慣失敗:', error);
       return {
         success: false,
-        message: '❌ 建立習慣時發生錯誤，請稍後再試。'
+        message: error.message.includes('找不到 Habits 分頁') ? 
+          '❌ 系統尚未設定習慣追蹤功能，請聯繫管理員。' :
+          '❌ 建立習慣時發生錯誤，請稍後再試。'
       };
     }
   }
@@ -80,7 +89,7 @@ class GoogleSheetsHabitController {
   // 習慣打卡
   async recordHabit(userId, habitName, status, notes = '') {
     try {
-      await this.initialize();
+      const doc = await this.getGoogleSheet();
       
       // 先找到習慣
       const habit = await this.findHabitByName(userId, habitName);
@@ -91,9 +100,9 @@ class GoogleSheetsHabitController {
         };
       }
 
-      const recordsSheet = this.doc.sheetsByTitle['Habit_Records'];
+      const recordsSheet = doc.sheetsByTitle['Habit_Records'];
       if (!recordsSheet) {
-        throw new Error('找不到 Habit_Records 分頁');
+        throw new Error('找不到 Habit_Records 分頁，請先執行 setup-habit-sheets.js 建立分頁');
       }
 
       const recordId = this.generateId('rec');
@@ -101,24 +110,23 @@ class GoogleSheetsHabitController {
       const createdAt = moment().format('YYYY-MM-DD HH:mm:ss');
 
       // 檢查今天是否已經打卡
-      await recordsSheet.loadCells();
       const rows = await recordsSheet.getRows();
       const todayRecord = rows.find(row => 
-        row.habit_id === habit.habit_id && 
-        row.user_id === userId && 
-        row.record_date === recordDate
+        row.get('habit_id') === habit.get('habit_id') && 
+        row.get('user_id') === userId && 
+        row.get('record_date') === recordDate
       );
 
       if (todayRecord) {
         // 更新現有記錄
-        todayRecord.completion_status = status;
-        todayRecord.notes = notes;
+        todayRecord.set('completion_status', status);
+        todayRecord.set('notes', notes);
         await todayRecord.save();
       } else {
         // 新增記錄
         await recordsSheet.addRow({
           record_id: recordId,
-          habit_id: habit.habit_id,
+          habit_id: habit.get('habit_id'),
           user_id: userId,
           record_date: recordDate,
           completion_status: status,
@@ -128,7 +136,7 @@ class GoogleSheetsHabitController {
       }
 
       // 計算統計數據
-      const stats = await this.calculateHabitStats(userId, habit.habit_id);
+      const stats = await this.calculateHabitStats(userId, habit.get('habit_id'));
       
       const statusIcon = status === 'completed' ? '✅' : '❌';
       const encouragement = this.getEncouragement(stats.currentStreak, status === 'completed');
@@ -142,7 +150,9 @@ class GoogleSheetsHabitController {
       console.error('❌ 習慣打卡失敗:', error);
       return {
         success: false,
-        message: '❌ 打卡時發生錯誤，請稍後再試。'
+        message: error.message.includes('找不到 Habit_Records 分頁') ? 
+          '❌ 系統尚未設定習慣追蹤功能，請聯繫管理員。' :
+          '❌ 打卡時發生錯誤，請稍後再試。'
       };
     }
   }
@@ -176,7 +186,7 @@ class GoogleSheetsHabitController {
   // 查詢習慣狀態
   async getHabitStatus(userId, habitName) {
     try {
-      await this.initialize();
+      const doc = await this.getGoogleSheet();
 
       const habit = await this.findHabitByName(userId, habitName);
       if (!habit) {
@@ -186,8 +196,8 @@ class GoogleSheetsHabitController {
         };
       }
 
-      const stats = await this.calculateHabitStats(userId, habit.habit_id);
-      const recentRecords = await this.getRecentRecords(userId, habit.habit_id, 7);
+      const stats = await this.calculateHabitStats(userId, habit.get('habit_id'));
+      const recentRecords = await this.getRecentRecords(userId, habit.get('habit_id'), 7);
 
       let statusText = `📊 習慣「${habitName}」狀態報告\n\n`;
       statusText += `🎯 連續完成：${stats.currentStreak} 天\n`;
@@ -197,9 +207,9 @@ class GoogleSheetsHabitController {
       
       statusText += `📅 近7天記錄：\n`;
       recentRecords.forEach(record => {
-        const icon = record.completion_status === 'completed' ? '✅' : 
-                     record.completion_status === 'failed' ? '❌' : '⭕';
-        statusText += `${record.record_date} ${icon}\n`;
+        const icon = record.get('completion_status') === 'completed' ? '✅' : 
+                     record.get('completion_status') === 'failed' ? '❌' : '⭕';
+        statusText += `${record.get('record_date')} ${icon}\n`;
       });
 
       return {
@@ -219,13 +229,20 @@ class GoogleSheetsHabitController {
   // 查詢習慣列表
   async getHabitList(userId) {
     try {
-      await this.initialize();
+      const doc = await this.getGoogleSheet();
 
-      const habitsSheet = this.doc.sheetsByTitle['Habits'];
+      const habitsSheet = doc.sheetsByTitle['Habits'];
+      if (!habitsSheet) {
+        return {
+          success: false,
+          message: '❌ 系統尚未設定習慣追蹤功能，請聯繫管理員。'
+        };
+      }
+
       const rows = await habitsSheet.getRows();
       
       const userHabits = rows.filter(row => 
-        row.user_id === userId && row.status === 'active'
+        row.get('user_id') === userId && row.get('status') === 'active'
       );
 
       if (userHabits.length === 0) {
@@ -238,10 +255,10 @@ class GoogleSheetsHabitController {
       let listText = `📋 你的習慣列表 (共 ${userHabits.length} 個)\n\n`;
       
       for (const habit of userHabits) {
-        const stats = await this.calculateHabitStats(userId, habit.habit_id);
-        const frequencyText = this.getFrequencyText(habit.frequency_type, habit.frequency_value);
+        const stats = await this.calculateHabitStats(userId, habit.get('habit_id'));
+        const frequencyText = this.getFrequencyText(habit.get('frequency_type'), habit.get('frequency_value'));
         
-        listText += `🎯 ${habit.habit_name}\n`;
+        listText += `🎯 ${habit.get('habit_name')}\n`;
         listText += `   📅 ${frequencyText} | 🔥 連續 ${stats.currentStreak} 天\n`;
         listText += `   📊 本月完成率 ${stats.monthlyRate}%\n\n`;
       }
@@ -263,14 +280,14 @@ class GoogleSheetsHabitController {
   // 暫停/恢復習慣
   async toggleHabitStatus(userId, habitName, action) {
     try {
-      await this.initialize();
+      const doc = await this.getGoogleSheet();
 
-      const habitsSheet = this.doc.sheetsByTitle['Habits'];
+      const habitsSheet = doc.sheetsByTitle['Habits'];
       const rows = await habitsSheet.getRows();
       
       const habitRow = rows.find(row => 
-        row.user_id === userId && 
-        row.habit_name === habitName
+        row.get('user_id') === userId && 
+        row.get('habit_name') === habitName
       );
 
       if (!habitRow) {
@@ -281,7 +298,7 @@ class GoogleSheetsHabitController {
       }
 
       const newStatus = action === 'pause' ? 'paused' : 'active';
-      habitRow.status = newStatus;
+      habitRow.set('status', newStatus);
       await habitRow.save();
 
       const actionText = action === 'pause' ? '暫停' : '恢復';
@@ -301,24 +318,30 @@ class GoogleSheetsHabitController {
 
   // 輔助方法：根據名稱找習慣
   async findHabitByName(userId, habitName) {
-    const habitsSheet = this.doc.sheetsByTitle['Habits'];
+    const doc = await this.getGoogleSheet();
+    const habitsSheet = doc.sheetsByTitle['Habits'];
+    if (!habitsSheet) return null;
+    
     const rows = await habitsSheet.getRows();
     
     return rows.find(row => 
-      row.user_id === userId && 
-      row.habit_name === habitName && 
-      row.status === 'active'
+      row.get('user_id') === userId && 
+      row.get('habit_name') === habitName && 
+      row.get('status') === 'active'
     );
   }
 
   // 輔助方法：計算習慣統計
   async calculateHabitStats(userId, habitId) {
-    const recordsSheet = this.doc.sheetsByTitle['Habit_Records'];
+    const doc = await this.getGoogleSheet();
+    const recordsSheet = doc.sheetsByTitle['Habit_Records'];
+    if (!recordsSheet) return { currentStreak: 0, maxStreak: 0, weeklyRate: 0, monthlyRate: 0 };
+    
     const rows = await recordsSheet.getRows();
     
     const userRecords = rows.filter(row => 
-      row.user_id === userId && row.habit_id === habitId
-    ).sort((a, b) => new Date(b.record_date) - new Date(a.record_date));
+      row.get('user_id') === userId && row.get('habit_id') === habitId
+    ).sort((a, b) => new Date(b.get('record_date')) - new Date(a.get('record_date')));
 
     // 計算當前連續天數
     let currentStreak = 0;
@@ -326,8 +349,8 @@ class GoogleSheetsHabitController {
     let tempStreak = 0;
 
     for (let i = 0; i < userRecords.length; i++) {
-      if (userRecords[i].completion_status === 'completed') {
-        if (i === 0 || moment(userRecords[i-1].record_date).diff(moment(userRecords[i].record_date), 'days') === 1) {
+      if (userRecords[i].get('completion_status') === 'completed') {
+        if (i === 0 || moment(userRecords[i-1].get('record_date')).diff(moment(userRecords[i].get('record_date')), 'days') === 1) {
           tempStreak++;
           if (i === 0) currentStreak = tempStreak;
         } else {
@@ -345,17 +368,17 @@ class GoogleSheetsHabitController {
     const thisMonthStart = moment().startOf('month');
 
     const thisWeekRecords = userRecords.filter(record => 
-      moment(record.record_date).isSameOrAfter(thisWeekStart)
+      moment(record.get('record_date')).isSameOrAfter(thisWeekStart)
     );
     const thisMonthRecords = userRecords.filter(record => 
-      moment(record.record_date).isSameOrAfter(thisMonthStart)
+      moment(record.get('record_date')).isSameOrAfter(thisMonthStart)
     );
 
     const weeklyRate = thisWeekRecords.length === 0 ? 0 : 
-      Math.round((thisWeekRecords.filter(r => r.completion_status === 'completed').length / thisWeekRecords.length) * 100);
+      Math.round((thisWeekRecords.filter(r => r.get('completion_status') === 'completed').length / thisWeekRecords.length) * 100);
     
     const monthlyRate = thisMonthRecords.length === 0 ? 0 : 
-      Math.round((thisMonthRecords.filter(r => r.completion_status === 'completed').length / thisMonthRecords.length) * 100);
+      Math.round((thisMonthRecords.filter(r => r.get('completion_status') === 'completed').length / thisMonthRecords.length) * 100);
 
     return {
       currentStreak,
@@ -367,16 +390,19 @@ class GoogleSheetsHabitController {
 
   // 輔助方法：獲取最近記錄
   async getRecentRecords(userId, habitId, days = 7) {
-    const recordsSheet = this.doc.sheetsByTitle['Habit_Records'];
+    const doc = await this.getGoogleSheet();
+    const recordsSheet = doc.sheetsByTitle['Habit_Records'];
+    if (!recordsSheet) return [];
+    
     const rows = await recordsSheet.getRows();
     
     const startDate = moment().subtract(days - 1, 'days').format('YYYY-MM-DD');
     
     return rows.filter(row => 
-      row.user_id === userId && 
-      row.habit_id === habitId && 
-      row.record_date >= startDate
-    ).sort((a, b) => new Date(b.record_date) - new Date(a.record_date));
+      row.get('user_id') === userId && 
+      row.get('habit_id') === habitId && 
+      row.get('record_date') >= startDate
+    ).sort((a, b) => new Date(b.get('record_date')) - new Date(a.get('record_date')));
   }
 
   // 輔助方法：獲取頻率文字
