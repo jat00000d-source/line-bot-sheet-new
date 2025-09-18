@@ -20,7 +20,11 @@ try {
     '提醒列表': 'query_reminders',
     '剩餘': 'budget',
     '預算': 'budget',
-    '餘額': 'budget'
+    '餘額': 'budget',
+    // 新增習慣相關指令
+    '習慣列表': 'habit_list',
+    '我的習慣': 'habit_list',
+    '習慣統計': 'habit_list'
   };
   
   // 預設類別對應表
@@ -59,6 +63,14 @@ class EnhancedCommandParser {
 
   parseCommand(text, language = 'zh') {
     const lowerText = text.toLowerCase();
+    
+    // ✨ 新增：優先檢查習慣相關指令
+    const habitCommand = this.parseHabitCommand(text, language);
+    if (habitCommand) {
+      return habitCommand;
+    }
+    
+    // 原有的功能保持不變 ⬇️
     
     // 檢查特殊指令
     const commandType = COMMAND_MAPPING[text.trim()];
@@ -152,6 +164,194 @@ class EnhancedCommandParser {
     
     return { type: 'unknown' };
   }
+
+  // ===============================
+  // 🆕 習慣功能相關方法
+  // ===============================
+
+  parseHabitCommand(text, language = 'zh') {
+    const cleanText = text.trim().toLowerCase();
+
+    // 建立新習慣
+    if (this.isCreateHabitCommand(cleanText, language)) {
+      return this.parseCreateHabit(text, language);
+    }
+
+    // 習慣打卡
+    if (this.isHabitRecordCommand(cleanText, language)) {
+      return this.parseHabitRecord(text, language);
+    }
+
+    // 查詢習慣狀態
+    if (this.isHabitStatusCommand(cleanText, language)) {
+      return this.parseHabitStatus(text, language);
+    }
+
+    // 查詢習慣列表
+    if (this.isHabitListCommand(cleanText, language)) {
+      return { type: 'habit', action: 'list' };
+    }
+
+    // 暫停/恢復習慣
+    if (this.isHabitToggleCommand(cleanText, language)) {
+      return this.parseHabitToggle(text, language);
+    }
+
+    return null;
+  }
+
+  isCreateHabitCommand(text, language) {
+    const patterns = {
+      zh: [
+        /^新習慣\s+/,
+        /^建立習慣\s+/,
+        /^新增習慣\s+/,
+        /^創建習慣\s+/
+      ]
+    };
+    return patterns[language]?.some(pattern => pattern.test(text)) || false;
+  }
+
+  parseCreateHabit(text, language) {
+    let content = text.replace(/^(新習慣|建立習慣|新增習慣|創建習慣)\s+/i, '').trim();
+    
+    let habitName = content;
+    let category = '一般';
+    let frequencyType = 'daily';
+    let frequencyValue = 1;
+
+    // 解析頻率
+    if (/每週(\d+)次/i.test(content)) {
+      const match = content.match(/每週(\d+)次/i);
+      frequencyType = 'weekly';
+      frequencyValue = match ? parseInt(match[1]) : 3;
+      habitName = content.replace(/每週\d+次/gi, '').trim();
+    } else if (/每月(\d+)次/i.test(content)) {
+      const match = content.match(/每月(\d+)次/i);
+      frequencyType = 'monthly';
+      frequencyValue = match ? parseInt(match[1]) : 10;
+      habitName = content.replace(/每月\d+次/gi, '').trim();
+    }
+
+    // 解析分類
+    const categoryPatterns = {
+      健康: /健康|運動/i,
+      學習: /學習|读书/i,
+      工作: /工作/i,
+      生活: /生活/i
+    };
+
+    for (const [cat, pattern] of Object.entries(categoryPatterns)) {
+      if (pattern.test(habitName)) {
+        category = cat;
+        break;
+      }
+    }
+
+    return {
+      type: 'habit',
+      action: 'create',
+      habitName: habitName,
+      category: category,
+      frequencyType: frequencyType,
+      frequencyValue: frequencyValue,
+      description: ''
+    };
+  }
+
+  isHabitRecordCommand(text, language) {
+    return /[✓✅❌×]/i.test(text) || /打卡|完成|失敗/i.test(text);
+  }
+
+  parseHabitRecord(text, language) {
+    const habits = [];
+    const parts = text.split(/\s+/);
+    
+    for (let part of parts) {
+      if (/✓|✅/.test(part)) {
+        const habitName = part.replace(/[✓✅]/g, '').trim();
+        if (habitName) {
+          habits.push({
+            habitName: habitName,
+            status: 'completed',
+            notes: ''
+          });
+        }
+      } else if (/❌|×/.test(part)) {
+        const habitName = part.replace(/[❌×]/g, '').trim();
+        if (habitName) {
+          habits.push({
+            habitName: habitName,
+            status: 'failed',
+            notes: ''
+          });
+        }
+      }
+    }
+
+    if (habits.length === 0) {
+      let habitName = text.replace(/(打卡|完成|失敗)/gi, '').trim();
+      let status = /(失敗)/i.test(text) ? 'failed' : 'completed';
+      
+      habits.push({
+        habitName: habitName,
+        status: status,
+        notes: ''
+      });
+    }
+
+    return {
+      type: 'habit',
+      action: 'record',
+      batch: habits.length > 1,
+      habitStatuses: habits.length > 1 ? habits : undefined,
+      habitName: habits.length === 1 ? habits[0].habitName : undefined,
+      status: habits.length === 1 ? habits[0].status : undefined,
+      notes: habits.length === 1 ? habits[0].notes : undefined
+    };
+  }
+
+  isHabitStatusCommand(text, language) {
+    return /^(.+)(習慣|状态|狀態)$/.test(text) || /^查看\s*(.+)/.test(text);
+  }
+
+  parseHabitStatus(text, language) {
+    let habitName = text.replace(/(習慣|状态|狀態|查看)/gi, '').trim();
+    return {
+      type: 'habit',
+      action: 'status',
+      habitName: habitName
+    };
+  }
+
+  isHabitListCommand(text, language) {
+    const patterns = [
+      /^(習慣列表|查看習慣|所有習慣|習慣統計|我的習慣)$/
+    ];
+    return patterns.some(pattern => pattern.test(text));
+  }
+
+  isHabitToggleCommand(text, language) {
+    return /^(暫停|恢復|停止|繼續)\s*(.+)/.test(text);
+  }
+
+  parseHabitToggle(text, language) {
+    const match = text.match(/^(暫停|恢復|停止|繼續)\s*(.+)/);
+    if (!match) return null;
+    
+    const action = /暫停|停止/.test(match[1]) ? 'pause' : 'resume';
+    const habitName = match[2].replace(/習慣/gi, '').trim();
+    
+    return {
+      type: 'habit',
+      action: action,
+      habitName: habitName
+    };
+  }
+
+  // ===============================
+  // 原有功能保持不變 ⬇️
+  // ===============================
 
   isPurchaseCommand(text) {
     return this.purchaseKeywords.some(keyword => text.includes(keyword));
