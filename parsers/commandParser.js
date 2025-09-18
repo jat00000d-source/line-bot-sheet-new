@@ -168,36 +168,36 @@ class EnhancedCommandParser {
   // 🆕 習慣功能相關方法 - 修正指令類型
   // ===============================
 
-  parseHabitCommand(text, language = 'zh') {
-    const cleanText = text.trim().toLowerCase();
+parseHabitCommand(text, language = 'zh') {
+  const cleanText = text.trim().toLowerCase();
 
-    // 建立新習慣
-    if (this.isCreateHabitCommand(cleanText, language)) {
-      return this.parseCreateHabit(text, language);
-    }
-
-    // 習慣打卡
-    if (this.isHabitRecordCommand(cleanText, language)) {
-      return this.parseHabitRecord(text, language);
-    }
-
-    // 查詢習慣狀態
-    if (this.isHabitStatusCommand(cleanText, language)) {
-      return this.parseHabitStatus(text, language);
-    }
-
-    // 查詢習慣列表
-    if (this.isHabitListCommand(cleanText, language)) {
-      return { type: 'habit_list', action: 'list' };
-    }
-
-    // 暫停/恢復習慣
-    if (this.isHabitToggleCommand(cleanText, language)) {
-      return this.parseHabitToggle(text, language);
-    }
-
-    return null;
+  // 建立新習慣
+  if (this.isCreateHabitCommand(cleanText, language)) {
+    return this.parseCreateHabit(text, language);
   }
+
+  // 習慣打卡
+  if (this.isHabitRecordCommand(cleanText, language)) {
+    return this.parseHabitRecord(text, language);
+  }
+
+  // 查詢習慣狀態
+  if (this.isHabitStatusCommand(cleanText, language)) {
+    return this.parseHabitStatus(text, language);
+  }
+
+  // 查詢習慣列表
+  if (this.isHabitListCommand(cleanText, language)) {
+    return { type: 'habit_list', action: 'list' };
+  }
+
+  // 暫停/恢復習慣
+  if (this.isHabitToggleCommand(cleanText, language)) {
+    return this.parseHabitToggle(text, language);
+  }
+
+  return null;
+}
 
   isCreateHabitCommand(text, language) {
     const patterns = {
@@ -214,52 +214,56 @@ class EnhancedCommandParser {
            patterns.zh?.some(pattern => pattern.test(text)) || false;
   }
 
-  parseCreateHabit(text, language) {
-    let content = text.replace(/^(新習慣|建立習慣|新增習慣|創建習慣)\s+/i, '').trim();
-    
-    let habitName = content;
-    let category = '一般';
-    let frequencyType = 'daily';
-    let frequencyValue = 1;
+parseCreateHabit(text, language) {
+  console.log(`🔧 開始解析習慣建立指令: "${text}"`);
+  
+  let content = text.replace(/^(新習慣|建立習慣|新增習慣|創建習慣)\s+/i, '').trim();
+  console.log(`🔧 移除指令關鍵詞後: "${content}"`);
+  
+  let habitName = content;
+  let frequencyType = 'daily';
+  let frequencyValue = 1;
 
-    // 解析頻率
-    if (/每週(\d+)次/i.test(content)) {
-      const match = content.match(/每週(\d+)次/i);
-      frequencyType = 'weekly';
-      frequencyValue = match ? parseInt(match[1]) : 3;
-      habitName = content.replace(/每週\d+次/gi, '').trim();
-    } else if (/每月(\d+)次/i.test(content)) {
-      const match = content.match(/每月(\d+)次/i);
-      frequencyType = 'monthly';
-      frequencyValue = match ? parseInt(match[1]) : 10;
-      habitName = content.replace(/每月\d+次/gi, '').trim();
-    }
-
-    // 解析分類
-    const categoryPatterns = {
-      健康: /健康|運動/i,
-      學習: /學習|读书/i,
-      工作: /工作/i,
-      生活: /生活/i
-    };
-
-    for (const [cat, pattern] of Object.entries(categoryPatterns)) {
-      if (pattern.test(habitName)) {
-        category = cat;
-        break;
-      }
-    }
-
-    return {
-      type: 'habit_create',  // 修正：與 app.js 匹配
-      action: 'create',
-      habitName: habitName,
-      category: category,
-      frequencyType: frequencyType,
-      frequencyValue: frequencyValue,
-      description: ''
-    };
+  // 修正：頻率解析邏輯
+  if (/每週(\d+)次/i.test(content)) {
+    const match = content.match(/每週(\d+)次/i);
+    frequencyType = 'weekly';
+    frequencyValue = match ? parseInt(match[1]) : 3;
+    habitName = content.replace(/每週\d+次/gi, '').trim();
+    console.log(`🔧 識別到每週X次模式: ${frequencyValue}次`);
+  } else if (/每週/i.test(content)) {
+    // 處理只說「每週」沒有次數的情況
+    frequencyType = 'weekly';
+    frequencyValue = 3; // 預設每週3次
+    habitName = content.replace(/每週/gi, '').trim();
+    console.log(`🔧 識別到每週模式（無指定次數）: 預設3次`);
+  } else if (/每月(\d+)次/i.test(content)) {
+    const match = content.match(/每月(\d+)次/i);
+    frequencyType = 'monthly';
+    frequencyValue = match ? parseInt(match[1]) : 10;
+    habitName = content.replace(/每月\d+次/gi, '').trim();
+    console.log(`🔧 識別到每月X次模式: ${frequencyValue}次`);
+  } else if (/每月/i.test(content)) {
+    // 處理只說「每月」沒有次數的情況
+    frequencyType = 'monthly';
+    frequencyValue = 15; // 預設每月15次
+    habitName = content.replace(/每月/gi, '').trim();
+    console.log(`🔧 識別到每月模式（無指定次數）: 預設15次`);
+  } else {
+    console.log(`🔧 未識別到頻率關鍵詞，使用預設每天`);
   }
+
+  console.log(`🔧 解析結果: 名稱="${habitName}", 頻率="${frequencyType}", 值=${frequencyValue}`);
+
+  return {
+    type: 'habit_create',
+    action: 'create',
+    habitName: habitName,
+    frequencyType: frequencyType,
+    frequencyValue: frequencyValue,
+    description: ''
+  };
+}
 
   isHabitRecordCommand(text, language) {
     return /[✓✅❌×]/i.test(text) || /打卡|完成|失敗/i.test(text);
