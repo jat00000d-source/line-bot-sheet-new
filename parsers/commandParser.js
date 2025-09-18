@@ -64,9 +64,10 @@ class EnhancedCommandParser {
   parseCommand(text, language = 'zh') {
     const lowerText = text.toLowerCase();
     
-    // 🎯 優先檢查習慣相關指令
+    // 🎯 優先檢查習慣相關指令（必須在提醒檢查之前）
     const habitCommand = this.parseHabitCommand(text, language);
     if (habitCommand) {
+      console.log('🎯 識別到習慣指令:', habitCommand);
       return habitCommand;
     }
     
@@ -204,10 +205,13 @@ class EnhancedCommandParser {
         /^新習慣\s+/,
         /^建立習慣\s+/,
         /^新增習慣\s+/,
-        /^創建習慣\s+/
+        /^創建習慣\s+/,
+        /^新しい習慣\s+/,
+        /^習慣作成\s+/
       ]
     };
-    return patterns[language]?.some(pattern => pattern.test(text)) || false;
+    return patterns[language]?.some(pattern => pattern.test(text)) || 
+           patterns.zh?.some(pattern => pattern.test(text)) || false;
   }
 
   parseCreateHabit(text, language) {
@@ -466,6 +470,11 @@ class EnhancedCommandParser {
   }
 
   isReminderCommand(text) {
+    // 先檢查是否為習慣指令，如果是則不應該被視為提醒
+    if (text.startsWith('新習慣') || text.startsWith('建立習慣') || text.startsWith('創建習慣') || text.startsWith('新增習慣')) {
+      return false;
+    }
+    
     const reminderKeywords = [
       '提醒', 'リマインダー', 'remind', 'reminder',
       '明天', '明日', '後で', '今天', '今日', 
