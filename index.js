@@ -6,7 +6,8 @@ const moment = require('moment-timezone');
 // 導入模組化後的類別
 const GoogleSheetsExpenseController = require('./controllers/expenseController');
 const GoogleSheetsReminderController = require('./controllers/todoController');
-const GoogleSheetsPurchaseController = require('./controllers/purchaseController'); // 新增代購控制器
+const GoogleSheetsPurchaseController = require('./controllers/purchaseController');
+const GoogleSheetsHabitController = require('./controllers/habitController'); // 新增習慣控制器
 const EnhancedCommandParser = require('./parsers/commandParser');
 const BasicLanguageDetector = require('./utils/languageDetector');
 const { validateEnvironment, createServiceAccountAuth } = require('./utils/envValidator');
@@ -41,11 +42,12 @@ class LineBotApp {
   initializeControllers() {
     this.expenseController = new GoogleSheetsExpenseController();
     this.todoController = new GoogleSheetsReminderController(this.client);
-    this.purchaseController = new GoogleSheetsPurchaseController(); // 新增代購控制器
+    this.purchaseController = new GoogleSheetsPurchaseController();
+    this.habitController = new GoogleSheetsHabitController(this.client); // 新增習慣控制器
     this.commandParser = new EnhancedCommandParser();
     this.languageDetector = new BasicLanguageDetector();
     
-    console.log('✅ 控制器初始化完成 (包含 Google Sheets 整合 + 代購功能)');
+    console.log('✅ 控制器初始化完成 (包含 Google Sheets 整合 + 代購功能 + 習慣追蹤)');
   }
 
   setupMiddleware() {
@@ -71,7 +73,8 @@ class LineBotApp {
         services: {
           'expense-tracking': '✅ 運行中 (Google Sheets)',
           'reminders': '✅ 運行中 (Google Sheets)',
-          'purchase-tracking': '✅ 運行中 (Google Sheets)', // 新增代購服務狀態
+          'purchase-tracking': '✅ 運行中 (Google Sheets)',
+          'habit-tracking': '✅ 運行中 (Google Sheets)', // 新增習慣追蹤狀態
           'scheduler': '✅ 運行中'
         },
         environment: process.env.NODE_ENV || 'development'
@@ -81,20 +84,23 @@ class LineBotApp {
     // 根目錄端點
     this.app.get('/', (req, res) => {
       res.status(200).json({
-        message: 'LINE Bot 記帳提醒系統 - 代購版',
+        message: 'LINE Bot 記帳提醒系統 - 完整版',
         status: 'Running',
         timezone: 'JST (UTC+9)',
         features: [
           'Google Sheets 記帳功能', 
           'Google Sheets 提醒功能', 
-          'Google Sheets 代購功能', // 新增
+          'Google Sheets 代購功能',
+          'Google Sheets 習慣追蹤', // 新增
           '自動提醒發送', 
           '多語言支援 (繁體中文/日語)', 
           '預算管理',
           '重複提醒支援',
           '自然語言解析',
-          '朋友代購記錄', // 新增
-          '預付金管理' // 新增
+          '朋友代購記錄',
+          '預付金管理',
+          '習慣養成追蹤', // 新增
+          '習慣統計分析' // 新增
         ]
       });
     });
@@ -172,6 +178,34 @@ class LineBotApp {
       
       // 根據指令類型分發到對應的控制器
       switch (command.type) {
+        // === 習慣相關指令 === (新增)
+        case 'habit_create':
+          console.log('🎯 處理建立習慣指令');
+          response = await this.habitController.handleHabit(event, command, language);
+          break;
+          
+        case 'habit_record':
+          console.log('✅ 處理習慣打卡指令');
+          response = await this.habitController.handleHabit(event, command, language);
+          break;
+          
+        case 'habit_status':
+          console.log('📊 處理習慣狀態查詢');
+          response = await this.habitController.handleHabit(event, command, language);
+          break;
+          
+        case 'habit_list':
+          console.log('📋 處理習慣列表查詢');
+          response = await this.habitController.handleHabit(event, command, language);
+          break;
+          
+        case 'habit_pause':
+        case 'habit_resume':
+          console.log('⏸️ 處理習慣暫停/恢復');
+          response = await this.habitController.handleHabit(event, command, language);
+          break;
+
+        // === 代購相關指令 ===
         case 'purchase':
           console.log('🛍️ 處理代購指令');
           response = await this.purchaseController.handlePurchase(event, command);
@@ -187,6 +221,7 @@ class LineBotApp {
           response = await this.purchaseController.handlePurchaseQuery(event, command);
           break;
         
+        // === 記帳相關指令 ===
         case 'expense':
           console.log('💰 處理記帳指令');
           response = await this.expenseController.handleExpense(event, command);
@@ -216,6 +251,7 @@ class LineBotApp {
           };
           break;
         
+        // === 提醒相關指令 ===
         case 'reminder':
           console.log('⏰ 處理提醒指令');
           response = await this.todoController.handleTodo(event, command, language);
@@ -231,12 +267,12 @@ class LineBotApp {
           response = await this.todoController.handleDeleteReminder(event, command, language);
           break;
         
+        // === 說明和預設 ===
         case 'help':
           console.log('❓ 顯示說明');
-          const HelpService = require('./services/helpService');
           response = {
             type: 'text',
-            text: this.getExtendedHelpMessage(language) // 使用擴展的說明訊息
+            text: this.getExtendedHelpMessage(language)
           };
           break;
         
@@ -307,10 +343,19 @@ class LineBotApp {
 • 查看代購 → 查詢所有代購記錄
 • 查看代購 小明 → 查詢特定朋友記錄
 
+🎯 習慣追蹤： (新功能！)
+• 新習慣 每天運動30分鐘 → 建立新習慣
+• 運動✅ → 完成打卡
+• 運動❌ → 未完成打卡
+• 習慣列表 → 查看所有習慣
+• 習慣統計 運動 → 查看特定習慣統計
+• 暫停習慣 運動 → 暫停習慣追蹤
+
 💡 支援格式：
 • 自然語言：今天花了500元買午餐
 • 簡潔格式：午餐 500
 • 多語言：繁體中文、日語
+• 習慣打卡：[習慣名]✅ 或 [習慣名]❌
 
 ❓ 其他指令：
 • 說明 → 顯示此說明
@@ -328,14 +373,15 @@ class LineBotApp {
     this.app.listen(this.port, () => {
       const startTime = moment().tz('Asia/Tokyo');
       console.log('\n🚀 =================================');
-      console.log(`   LINE Bot 伺服器啟動成功 - 代購版`);
+      console.log(`   LINE Bot 伺服器啟動成功 - 完整版`);
       console.log('🚀 =================================');
       console.log(`📍 Port: ${this.port}`);
       console.log(`🕐 啟動時間: ${startTime.format('YYYY-MM-DD HH:mm:ss JST')}`);
       console.log(`🌏 時區: Asia/Tokyo (JST, UTC+9)`);
       console.log(`💰 記帳功能: ✅ 已啟用 (Google Sheets)`);
       console.log(`⏰ 提醒功能: ✅ 已啟用 (Google Sheets + 自動發送)`);
-      console.log(`🛍️ 代購功能: ✅ 已啟用 (Google Sheets + 餘額管理)`); // 新增
+      console.log(`🛍️ 代購功能: ✅ 已啟用 (Google Sheets + 餘額管理)`);
+      console.log(`🎯 習慣追蹤: ✅ 已啟用 (Google Sheets + 統計分析)`); // 新增
       console.log(`🔄 排程系統: ✅ 已啟用 (每分鐘檢查)`);
       console.log(`🌐 多語言支援: ✅ 繁體中文/日語`);
       console.log('\n✅ 伺服器準備就緒，等待請求...\n');
