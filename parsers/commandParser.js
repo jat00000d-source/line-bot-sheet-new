@@ -64,13 +64,11 @@ class EnhancedCommandParser {
   parseCommand(text, language = 'zh') {
     const lowerText = text.toLowerCase();
     
-    // ✨ 新增：優先檢查習慣相關指令
+    // 🎯 優先檢查習慣相關指令
     const habitCommand = this.parseHabitCommand(text, language);
     if (habitCommand) {
       return habitCommand;
     }
-    
-    // 原有的功能保持不變 ⬇️
     
     // 檢查特殊指令
     const commandType = COMMAND_MAPPING[text.trim()];
@@ -166,7 +164,7 @@ class EnhancedCommandParser {
   }
 
   // ===============================
-  // 🆕 習慣功能相關方法
+  // 🆕 習慣功能相關方法 - 修正指令類型
   // ===============================
 
   parseHabitCommand(text, language = 'zh') {
@@ -189,7 +187,7 @@ class EnhancedCommandParser {
 
     // 查詢習慣列表
     if (this.isHabitListCommand(cleanText, language)) {
-      return { type: 'habit', action: 'list' };
+      return { type: 'habit_list', action: 'list' };
     }
 
     // 暫停/恢復習慣
@@ -249,7 +247,7 @@ class EnhancedCommandParser {
     }
 
     return {
-      type: 'habit',
+      type: 'habit_create',  // 修正：與 app.js 匹配
       action: 'create',
       habitName: habitName,
       category: category,
@@ -265,43 +263,43 @@ class EnhancedCommandParser {
 
   parseHabitRecord(text, language) {
     const habits = [];
-    const parts = text.split(/\s+/);
     
-    for (let part of parts) {
-      if (/✓|✅/.test(part)) {
-        const habitName = part.replace(/[✓✅]/g, '').trim();
-        if (habitName) {
-          habits.push({
-            habitName: habitName,
-            status: 'completed',
-            notes: ''
-          });
-        }
-      } else if (/❌|×/.test(part)) {
-        const habitName = part.replace(/[❌×]/g, '').trim();
-        if (habitName) {
-          habits.push({
-            habitName: habitName,
-            status: 'failed',
-            notes: ''
-          });
-        }
+    // 解析多個習慣的打卡格式：運動✅ 讀書❌ 早起✓
+    const batchPattern = /([^✓✅❌×]+)\s*([✓✅❌×])/g;
+    const matches = [...text.matchAll(batchPattern)];
+    
+    if (matches.length > 0) {
+      for (const match of matches) {
+        const habitName = match[1].trim();
+        const statusSymbol = match[2];
+        const isCompleted = ['✅', '✓'].includes(statusSymbol);
+        
+        habits.push({
+          habitName: habitName,
+          status: isCompleted ? 'completed' : 'failed',
+          notes: ''
+        });
+      }
+    } else {
+      // 單個習慣打卡或文字格式
+      let habitName = text.replace(/(打卡|完成|失敗|✓|✅|❌|×)/gi, '').trim();
+      let status = /(失敗|❌|×)/i.test(text) ? 'failed' : 'completed';
+      
+      if (habitName) {
+        habits.push({
+          habitName: habitName,
+          status: status,
+          notes: ''
+        });
       }
     }
 
     if (habits.length === 0) {
-      let habitName = text.replace(/(打卡|完成|失敗)/gi, '').trim();
-      let status = /(失敗)/i.test(text) ? 'failed' : 'completed';
-      
-      habits.push({
-        habitName: habitName,
-        status: status,
-        notes: ''
-      });
+      return null;
     }
 
     return {
-      type: 'habit',
+      type: 'habit_record',  // 修正：與 app.js 匹配
       action: 'record',
       batch: habits.length > 1,
       habitStatuses: habits.length > 1 ? habits : undefined,
@@ -312,13 +310,13 @@ class EnhancedCommandParser {
   }
 
   isHabitStatusCommand(text, language) {
-    return /^(.+)(習慣|状态|狀態)$/.test(text) || /^查看\s*(.+)/.test(text);
+    return /^(.+)(習慣狀態|習慣統計|習慣分析)$/.test(text) || /^查看\s*(.+)\s*習慣/.test(text);
   }
 
   parseHabitStatus(text, language) {
-    let habitName = text.replace(/(習慣|状态|狀態|查看)/gi, '').trim();
+    let habitName = text.replace(/(習慣狀態|習慣統計|習慣分析|查看|習慣)/gi, '').trim();
     return {
-      type: 'habit',
+      type: 'habit_status',  // 修正：與 app.js 匹配
       action: 'status',
       habitName: habitName
     };
@@ -339,18 +337,18 @@ class EnhancedCommandParser {
     const match = text.match(/^(暫停|恢復|停止|繼續)\s*(.+)/);
     if (!match) return null;
     
-    const action = /暫停|停止/.test(match[1]) ? 'pause' : 'resume';
+    const isPause = /暫停|停止/.test(match[1]);
     const habitName = match[2].replace(/習慣/gi, '').trim();
     
     return {
-      type: 'habit',
-      action: action,
+      type: isPause ? 'habit_pause' : 'habit_resume',  // 修正：與 app.js 匹配
+      action: isPause ? 'pause' : 'resume',
       habitName: habitName
     };
   }
 
   // ===============================
-  // 原有功能保持不變 ⬇️
+  // 原有功能保持不變
   // ===============================
 
   isPurchaseCommand(text) {
